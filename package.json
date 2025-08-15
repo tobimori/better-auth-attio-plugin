@@ -1,0 +1,12 @@
+{
+	"name": "better-auth-attio-plugin",
+	"module": "src/index.ts",
+	"type": "module",
+	"devDependencies": {
+		"@types/bun": "^1.2.20"
+	},
+	"peerDependencies": {
+		"better-auth": "^1.3.6",
+		"typescript": "^5.9.2"
+	}
+}

@@ -6,14 +6,30 @@ import {
 	type Organization,
 } from "better-auth/plugins";
 import { z } from "zod";
+import type { FieldMapping } from "./helpers/field-mappings";
 import { validateSecret } from "./helpers/secret";
 import { sendWebhookEvent } from "./helpers/send-event";
 
 export type AttioPluginOptions = {
 	/**
-	 *
+	 * Secret key for securing webhook endpoints
 	 */
 	secret?: string;
+
+	/**
+	 * Attio object configuration for syncing Better Auth data
+	 * Maps Better Auth models to Attio objects with field mappings
+	 * Fields will be automatically created in Attio if they don't exist
+	 */
+	objects?: {
+		user?: Partial<FieldMapping>;
+		workspace?: Partial<FieldMapping>;
+		/**
+		 * Additional custom objects to sync
+		 * Key is the Better Auth model name
+		 */
+		[key: string]: Partial<FieldMapping> | undefined;
+	};
 
 	/**
 	 *
@@ -231,8 +247,8 @@ export const attio = (opts: AttioPluginOptions) => {
 				},
 				async (ctx) => {
 					// validate using secret from body
-					const { secret, ...webhookData } = ctx.body;
-					
+					const { secret: _, ...webhookData } = ctx.body;
+
 					const error = validateSecret(opts, ctx);
 					if (error) return error;
 

@@ -4,6 +4,7 @@ import {
 	createAuthEndpoint,
 	type Member,
 	type Organization,
+	type UserWithRole,
 } from "better-auth/plugins";
 import { z } from "zod";
 import type { FieldMapping } from "./helpers/field-mappings";
@@ -514,6 +515,63 @@ export const attio = (opts: AttioPluginOptions) => {
 
 						return ctx.json({
 							success: true,
+						});
+					} catch (_) {
+						return ctx.error("INTERNAL_SERVER_ERROR");
+					}
+				},
+			),
+
+			/**
+			 * Get user details with admin-specific information
+			 */
+			getUserDetails: createAuthEndpoint(
+				"/attio/user-details",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						userId: z.string(),
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					if (!opts.admin) {
+						return ctx.json(
+							{
+								error: "ADMIN_PLUGIN_NOT_ENABLED",
+								message: "Admin plugin is required for user details",
+							},
+							{
+								status: 501,
+							},
+						);
+					}
+
+					try {
+						const user = (await ctx.context.internalAdapter.findUserById(
+							ctx.body.userId,
+						)) as UserWithRole;
+
+						if (!user) {
+							return ctx.error("NOT_FOUND");
+						}
+
+						// extract admin-specific fields from user record
+						const banned = Boolean(user.banned);
+						const bannedUntil = user.banExpires
+							? user.banExpires.toISOString()
+							: null;
+						const banReason = user.banReason || null;
+						const role = user.role || "user";
+
+						return ctx.json({
+							banned,
+							bannedUntil,
+							banReason,
+							role,
 						});
 					} catch (_) {
 						return ctx.error("INTERNAL_SERVER_ERROR");

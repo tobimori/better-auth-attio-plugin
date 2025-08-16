@@ -1,6 +1,14 @@
-import type { AuthContext, EndpointContext, Method } from "better-auth";
-import { type BetterAuthPlugin, createAuthEndpoint } from "better-auth/plugins";
+import type { User } from "better-auth";
+import {
+	type BetterAuthPlugin,
+	createAuthEndpoint,
+	type Member,
+	type Organization,
+} from "better-auth/plugins";
 import { z } from "zod";
+import { validateSecret } from "./helpers/secret";
+import { sendWebhookEvent } from "./helpers/send-event";
+import { validateWebhookSignature } from "./helpers/webhook";
 
 export type AttioPluginOptions = {
 	/**
@@ -17,32 +25,85 @@ export type AttioPluginOptions = {
 	 *
 	 */
 	admin?: boolean;
+
+	/**
+	 *
+	 */
+	waitUntil?: (promise: Promise<unknown>) => void;
 };
 
 export const attio = (opts: AttioPluginOptions) => {
-	const validateSecret = (
-		ctx: EndpointContext<
-			string,
-			{
-				method: Method;
-				body: z.ZodObject<{
-					secret: z.ZodString;
-				}>;
-			},
-			AuthContext
-		>,
-	) => {
-		const secret = opts.secret || ctx.context.secret;
-		if (secret && ctx.body.secret !== secret) {
-			return ctx.error("UNAUTHORIZED");
-		}
-		return null;
-	};
-
 	return {
 		id: "attio",
+		init: (ctx) => ({
+			options: {
+				databaseHooks: {
+					user: {
+						create: {
+							after: async (user: Partial<User>) => {
+								await sendWebhookEvent(ctx.adapter, opts, "user.created", user);
+							},
+						},
+						update: {
+							after: async (user: Partial<User>) => {
+								await sendWebhookEvent(ctx.adapter, opts, "user.updated", user);
+							},
+						},
+					},
+
+					...(opts.organization
+						? {
+								organization: {
+									create: {
+										after: async (organization: Partial<Organization>) => {
+											await sendWebhookEvent(
+												ctx.adapter,
+												opts,
+												"organization.created",
+												organization,
+											);
+										},
+									},
+									update: {
+										after: async (organization: Partial<Organization>) => {
+											await sendWebhookEvent(
+												ctx.adapter,
+												opts,
+												"organization.updated",
+												organization,
+											);
+										},
+									},
+								},
+								member: {
+									create: {
+										after: async (member: Partial<Member>) => {
+											await sendWebhookEvent(
+												ctx.adapter,
+												opts,
+												"member.created",
+												member,
+											);
+										},
+									},
+									update: {
+										after: async (member: Partial<Member>) => {
+											await sendWebhookEvent(
+												ctx.adapter,
+												opts,
+												"member.updated",
+												member,
+											);
+										},
+									},
+								},
+							}
+						: {}),
+				},
+			},
+		}),
 		schema: {
-			// this stores our webhook url
+			// this stores our webhook url and secret
 			// for the sync endpoint
 			attioIntegration: {
 				fields: {
@@ -50,6 +111,10 @@ export const attio = (opts: AttioPluginOptions) => {
 						type: "string",
 						required: true,
 						unique: true,
+					},
+					webhookSecret: {
+						type: "string",
+						required: true,
 					},
 				},
 			},
@@ -79,6 +144,9 @@ export const attio = (opts: AttioPluginOptions) => {
 				: {}),
 		},
 		endpoints: {
+			/**
+			 * Link Attio integration event
+			 */
 			linkAttio: createAuthEndpoint(
 				"/attio/link",
 				{
@@ -86,16 +154,18 @@ export const attio = (opts: AttioPluginOptions) => {
 					body: z.object({
 						secret: z.string(),
 						webhookUrl: z.url(),
+						webhookSecret: z.string(),
 					}),
 				},
 				async (ctx) => {
-					const error = validateSecret(ctx);
+					const error = validateSecret(opts, ctx);
 					if (error) return error;
 
 					const webhook = await ctx.context.adapter.create({
 						model: "attioIntegration",
 						data: {
 							webhookUrl: ctx.body.webhookUrl,
+							webhookSecret: ctx.body.webhookSecret,
 						},
 					});
 
@@ -105,6 +175,9 @@ export const attio = (opts: AttioPluginOptions) => {
 				},
 			),
 
+			/**
+			 * Unlink Attio integration event
+			 */
 			unlinkAttio: createAuthEndpoint(
 				"/attio/unlink",
 				{
@@ -115,7 +188,7 @@ export const attio = (opts: AttioPluginOptions) => {
 					}),
 				},
 				async (ctx) => {
-					const error = validateSecret(ctx);
+					const error = validateSecret(opts, ctx);
 					if (error) return error;
 
 					// find and delete the webhook registration
@@ -146,6 +219,48 @@ export const attio = (opts: AttioPluginOptions) => {
 					return ctx.json({
 						success: true,
 					});
+				},
+			),
+
+			/**
+			 * Receive webhook events from Attio
+			 * E.g. record updates
+			 */
+			attioWebhook: createAuthEndpoint(
+				"/attio/webhook",
+				{
+					method: "POST",
+					body: z.any(),
+					requireHeaders: true,
+				},
+				async (ctx) => {
+					// get signature from headers
+					const signature =
+						ctx.headers?.get("attio-signature") ||
+						ctx.headers?.get("x-attio-signature");
+
+					if (!signature || typeof signature !== "string") {
+						return ctx.error("UNAUTHORIZED", { message: "Missing signature" });
+					}
+
+					// validate webhook signature
+					const bodyString = JSON.stringify(ctx.body);
+					const isValid = await validateWebhookSignature(
+						ctx.context.adapter,
+						signature,
+						bodyString,
+					);
+
+					if (!isValid) {
+						return ctx.error("UNAUTHORIZED", { message: "Invalid signature" });
+					}
+
+					console.log(
+						"[Attio Webhook] Full event data:",
+						JSON.stringify(ctx.body, null, 2),
+					);
+
+					return ctx.json({ success: true });
 				},
 			),
 		},

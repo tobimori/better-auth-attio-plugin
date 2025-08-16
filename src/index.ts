@@ -33,7 +33,7 @@ export type AttioPluginOptions = {
 		 * Key is the Better Auth model name
 		 */
 		[key: string]: Partial<FieldMapping> | undefined;
-	};
+	}; // TODO: adapter pattern.
 
 	/**
 	 * What to do when a record from Attio doesn't exist in Better Auth
@@ -418,6 +418,77 @@ export const attio = (opts: AttioPluginOptions) => {
 					}
 
 					return ctx.json({ success: true });
+				},
+			),
+
+			/**
+			 * Get user sessions by userId
+			 */
+			getUserSessions: createAuthEndpoint(
+				"/attio/sessions",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						userId: z.string(),
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					const sessions = await ctx.context.internalAdapter.listSessions(
+						ctx.body.userId,
+					);
+
+					const now = new Date();
+					const activeSessions = sessions.filter(
+						(s) => !s.expiresAt || new Date(s.expiresAt) > now,
+					);
+
+					return ctx.json({
+						sessions: [...sessions].sort((a, b) => {
+							const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+							const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+							return tb - ta;
+						}),
+						totalCount: sessions.length,
+						activeCount: activeSessions.length,
+					});
+				},
+			),
+
+			/**
+			 * Revoke a user session by token
+			 */
+			revokeSession: createAuthEndpoint(
+				"/attio/revoke-session",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						sessionToken: z.string(),
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					try {
+						await ctx.context.internalAdapter.deleteSession(
+							ctx.body.sessionToken,
+						);
+
+						return ctx.json({
+							success: true,
+							message: "Session revoked successfully",
+						});
+					} catch (_) {
+						return ctx.json({
+							success: false,
+							message: "Failed to revoke session",
+						});
+					}
 				},
 			),
 		},

@@ -578,6 +578,55 @@ export const attio = (opts: AttioPluginOptions) => {
 					}
 				},
 			),
+
+			/**
+			 * Update user ban status
+			 */
+			updateUserBanStatus: createAuthEndpoint(
+				"/attio/update-ban-status",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						userId: z.string(),
+						banned: z.boolean(),
+						banReason: z.string().nullable().optional(),
+						banExpires: z.string().nullable().optional(), // ISO date string
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					if (!opts.admin) {
+						return ctx.json(
+							{
+								error: "ADMIN_PLUGIN_NOT_ENABLED",
+								message: "Admin plugin is required for ban management",
+							},
+							{
+								status: 501,
+							},
+						);
+					}
+
+					try {
+						await ctx.context.internalAdapter.updateUser(ctx.body.userId, {
+							banned: ctx.body.banned,
+							banReason: ctx.body.banReason ?? null,
+							banExpires: ctx.body.banExpires
+								? new Date(ctx.body.banExpires)
+								: null,
+						});
+
+						return ctx.json({
+							success: true,
+						});
+					} catch (_) {
+						return ctx.error("INTERNAL_SERVER_ERROR");
+					}
+				},
+			),
 		},
 	} satisfies BetterAuthPlugin;
 };

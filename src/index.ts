@@ -627,6 +627,147 @@ export const attio = (opts: AttioPluginOptions) => {
 					}
 				},
 			),
+
+			/**
+			 * Impersonate a user - creates a session token
+			 */
+			impersonateUser: createAuthEndpoint(
+				"/attio/impersonate",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						targetUserId: z.string(), // the user to impersonate
+						adminEmail: z.string(), // the admin's email from Attio (for tracking who impersonated)
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					if (!opts.admin) {
+						return ctx.json(
+							{
+								error: "ADMIN_PLUGIN_NOT_ENABLED",
+								message: "Admin plugin is required for impersonation",
+							},
+							{
+								status: 501,
+							},
+						);
+					}
+
+					try {
+						// optionally find the admin user for tracking
+						const adminUser = await ctx.context.internalAdapter.findUserByEmail(
+							ctx.body.adminEmail,
+						);
+						const impersonatedBy = adminUser?.user?.id || ctx.body.adminEmail;
+
+						// get admin plugin options for impersonation duration
+						const adminPlugin = ctx.context.options.plugins?.find(
+							(p) => p.id === "admin",
+						);
+						const impersonationDuration =
+							adminPlugin?.options?.impersonationSessionDuration || 60 * 60; // default 1 hour
+
+						// create impersonation session
+						const expiresAt = new Date(
+							Date.now() + impersonationDuration * 1000,
+						);
+
+						const session = await ctx.context.internalAdapter.createSession(
+							ctx.body.targetUserId,
+							ctx,
+							true,
+							{
+								impersonatedBy,
+								expiresAt,
+							},
+							true,
+						);
+
+						console.log(session);
+
+						if (!session) {
+							return ctx.json(
+								{
+									error: "SESSION_CREATION_FAILED",
+									message: "Failed to create impersonation session",
+								},
+								{
+									status: 500,
+								},
+							);
+						}
+
+						return ctx.json({
+							success: true,
+							sessionToken: session.token,
+						});
+					} catch (_) {
+						return ctx.error("INTERNAL_SERVER_ERROR");
+					}
+				},
+			),
+
+			/**
+			 * Set impersonation session cookie from token
+			 */
+			setImpersonationSession: createAuthEndpoint(
+				"/attio/impersonation-session",
+				{
+					method: "GET",
+					query: z.object({
+						token: z.string(),
+					}),
+				},
+				async (ctx) => {
+					try {
+						// find the session to validate it exists
+						const sessionData = await ctx.context.internalAdapter.findSession(
+							ctx.query.token,
+						);
+
+						if (!sessionData?.session) {
+							return ctx.redirect("/?error=invalid_session");
+						}
+
+						const authCookies = ctx.context.authCookies;
+
+						// if there's an existing session, save it as admin_session
+						if (ctx.context.session?.session) {
+							const dontRememberMeCookie = await ctx.getSignedCookie(
+								ctx.context.authCookies.dontRememberToken.name,
+								ctx.context.secret,
+							);
+							const adminCookieProp =
+								ctx.context.createAuthCookie("admin_session");
+							await ctx.setSignedCookie(
+								adminCookieProp.name,
+								`${ctx.context.session.session.token}:${dontRememberMeCookie || ""}`,
+								ctx.context.secret,
+								authCookies.sessionToken.options,
+							);
+						}
+
+						// set the impersonation session cookie
+						await ctx.setSignedCookie(
+							authCookies.sessionToken.name,
+							sessionData.session.token,
+							ctx.context.secret,
+							authCookies.sessionToken.options,
+						);
+
+						// redirect to the app's base URL
+						return ctx.redirect("/");
+					} catch (error) {
+						console.error("Failed to set impersonation session:", error);
+						const baseUrl = ctx.request?.headers.get("referer") || "/";
+						return ctx.redirect(`${baseUrl}?error=session_failed`);
+					}
+				},
+			),
 		},
 	} satisfies BetterAuthPlugin;
 };

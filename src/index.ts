@@ -7,6 +7,10 @@ import {
 } from "better-auth/plugins";
 import { z } from "zod";
 import type { FieldMapping } from "./helpers/field-mappings";
+import {
+	getReverseFieldMapping,
+	mapAttioDataToBetterAuth,
+} from "./helpers/reverse-mapping";
 import { validateSecret } from "./helpers/secret";
 import { sendWebhookEvent } from "./helpers/send-event";
 
@@ -32,17 +36,36 @@ export type AttioPluginOptions = {
 	};
 
 	/**
-	 *
+	 * What to do when a record from Attio doesn't exist in Better Auth
+	 * - 'create': Create a new record in Better Auth (default)
+	 * - 'delete': Delete the orphaned record from Attio
+	 * - 'ignore': Skip and log
+	 * @default 'create'
+	 */
+	onMissing?: "create" | "delete" | "ignore";
+
+	/**
+	 * Whether to sync deletions between systems
+	 * When true, deleting a record in one system will delete it in the other
+	 * @default true
+	 */
+	syncDeletions?: boolean;
+
+	/**
+	 * Set this to true if the organization plugin is installed
 	 */
 	organization?: boolean;
 
 	/**
-	 *
+	 * Set this to true if the admin plugin is installed
 	 */
 	admin?: boolean;
 
 	/**
+	 * Optional handler to schedule work to run after the response is sent.
 	 *
+	 * @see https://vercel.com/docs/functions#advanced/using-waituntil
+	 * @see https://vercel.com/changelog/waituntil-is-now-available-for-vercel-functions
 	 */
 	waitUntil?: (promise: Promise<unknown>) => void;
 };
@@ -56,12 +79,24 @@ export const attio = (opts: AttioPluginOptions) => {
 					user: {
 						create: {
 							after: async (user: Partial<User>) => {
-								await sendWebhookEvent(ctx.adapter, opts, "user.created", user);
+								await sendWebhookEvent(
+									ctx.adapter,
+									opts,
+									"user.created",
+									user,
+									ctx.tables.user?.fields,
+								);
 							},
 						},
 						update: {
 							after: async (user: Partial<User>) => {
-								await sendWebhookEvent(ctx.adapter, opts, "user.updated", user);
+								await sendWebhookEvent(
+									ctx.adapter,
+									opts,
+									"user.updated",
+									user,
+									ctx.tables.user?.fields,
+								);
 							},
 						},
 					},
@@ -76,6 +111,7 @@ export const attio = (opts: AttioPluginOptions) => {
 												opts,
 												"organization.created",
 												organization,
+												ctx.tables.organization?.fields,
 											);
 										},
 									},
@@ -86,6 +122,7 @@ export const attio = (opts: AttioPluginOptions) => {
 												opts,
 												"organization.updated",
 												organization,
+												ctx.tables.organization?.fields,
 											);
 										},
 									},
@@ -98,6 +135,7 @@ export const attio = (opts: AttioPluginOptions) => {
 												opts,
 												"member.created",
 												member,
+												ctx.tables.member?.fields,
 											);
 										},
 									},
@@ -108,6 +146,7 @@ export const attio = (opts: AttioPluginOptions) => {
 												opts,
 												"member.updated",
 												member,
+												ctx.tables.member?.fields,
 											);
 										},
 									},
@@ -164,7 +203,7 @@ export const attio = (opts: AttioPluginOptions) => {
 					method: "POST",
 					body: z.object({
 						secret: z.string(),
-						webhookUrl: z.url(),
+						webhookUrl: z.string(),
 					}),
 				},
 				async (ctx) => {
@@ -246,16 +285,113 @@ export const attio = (opts: AttioPluginOptions) => {
 					}),
 				},
 				async (ctx) => {
-					// validate using secret from body
-					const { secret: _, ...webhookData } = ctx.body;
-
 					const error = validateSecret(opts, ctx);
 					if (error) return error;
 
-					console.log(
-						"[Attio Webhook] Full event data:",
-						JSON.stringify(webhookData, null, 2),
-					);
+					const onMissing = opts.onMissing || "create";
+					const syncDeletions = opts.syncDeletions !== false;
+
+					const reverseMapping = getReverseFieldMapping(opts.objects);
+
+					for (const event of ctx.body.events) {
+						try {
+							const eventType = event.event_type;
+							const record = event.record;
+							const object = event.object;
+
+							if (!record || !object) continue;
+
+							const modelMapping = reverseMapping[object.api_slug];
+							if (!modelMapping) continue;
+
+							const attioId = record.id.record_id;
+
+							const mappedData = mapAttioDataToBetterAuth(
+								record.values,
+								modelMapping.fields,
+							);
+
+							// always include attioId in mapped data
+							mappedData.attioId = attioId;
+
+							if (
+								eventType === "record.created" ||
+								eventType === "record.updated"
+							) {
+								// check for existing record by attioId or by the actual id
+								let existing = (await ctx.context.adapter.findOne({
+									model: modelMapping.model,
+									where: [{ field: "attioId", value: attioId }],
+								})) as { id: string; [key: string]: unknown };
+
+								// if not found by attioId and we have an id in the mapped data, check by id
+								if (!existing && mappedData.id) {
+									existing = (await ctx.context.adapter.findOne({
+										model: modelMapping.model,
+										where: [{ field: "id", value: mappedData.id as string }],
+									})) as { id: string; [key: string]: unknown };
+								}
+
+								if (existing) {
+									// check if there are actual changes (excluding id which can't be updated)
+									const changes: Record<string, unknown> = {};
+									for (const [key, value] of Object.entries(mappedData)) {
+										// skip id field - it's immutable
+										if (key === "id") continue;
+
+										if (existing[key] !== value) {
+											changes[key] = value;
+										}
+									}
+
+									// only update if there are changes
+									if (Object.keys(changes).length > 0) {
+										await ctx.context.adapter.update({
+											model: modelMapping.model,
+											where: [{ field: "id", value: existing.id }],
+											update: changes,
+										});
+									}
+								} else if (eventType === "record.created") {
+									// always create on record.created
+									await ctx.context.adapter.create({
+										model: modelMapping.model,
+										data: {
+											...mappedData,
+											attioId,
+										},
+									});
+								} else if (eventType === "record.updated") {
+									if (onMissing === "create") {
+										// create new record if onMissing is 'create'
+										await ctx.context.adapter.create({
+											model: modelMapping.model,
+											data: {
+												...mappedData,
+												attioId,
+											},
+										});
+									} else if (onMissing === "delete") {
+										// send delete event back to Attio to remove orphaned record
+										await sendWebhookEvent(
+											ctx.context.adapter,
+											opts,
+											`${modelMapping.model}.deleted` as any,
+											{ attioId },
+										);
+									}
+									// if onMissing is 'ignore', do nothing
+								}
+							} else if (eventType === "record.deleted" && syncDeletions) {
+								await ctx.context.adapter.delete({
+									model: modelMapping.model,
+									where: [{ field: "attioId", value: attioId }],
+								});
+							}
+						} catch (error) {
+							console.error(`Error processing event:`, error);
+						}
+					}
 
 					return ctx.json({ success: true });
 				},

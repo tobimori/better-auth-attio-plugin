@@ -35,7 +35,8 @@ export type FieldMapping = {
 	fields: Record<string, string>;
 };
 
-export type FieldMappings = Record<string, FieldMapping>;
+export type FieldMappings = Record<string, FieldMapping> &
+	typeof defaultFieldMappings;
 
 /**
  * Merges default field mappings with user-provided custom mappings
@@ -51,7 +52,8 @@ export function getMergedFieldMappings(
 
 	for (const [model, config] of Object.entries(customMappings)) {
 		if (config) {
-			const defaultMapping = defaultFieldMappings[model as keyof typeof defaultFieldMappings];
+			const defaultMapping =
+				defaultFieldMappings[model as keyof typeof defaultFieldMappings];
 			merged[model] = {
 				object: config.object || defaultMapping?.object || model,
 				fields: {

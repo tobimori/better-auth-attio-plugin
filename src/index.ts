@@ -354,23 +354,47 @@ export const attio = (opts: AttioPluginOptions) => {
 									}
 								} else if (eventType === "record.created") {
 									// always create on record.created
-									await ctx.context.adapter.create({
+									const createData = {
+										...mappedData,
+										attioId,
+									};
+
+									const created = await ctx.context.adapter.create({
 										model: modelMapping.model,
-										data: {
-											...mappedData,
-											attioId,
-										},
+										data: createData,
 									});
+
+									// send webhook event with full created record data
+									if (created) {
+										await sendWebhookEvent(
+											ctx.context.adapter,
+											opts,
+											`${modelMapping.model}.created` as any,
+											created,
+											ctx.context.tables?.[modelMapping.model]?.fields,
+										);
+									}
 								} else if (eventType === "record.updated") {
 									if (onMissing === "create") {
 										// create new record if onMissing is 'create'
-										await ctx.context.adapter.create({
+										const created = await ctx.context.adapter.create({
 											model: modelMapping.model,
 											data: {
 												...mappedData,
 												attioId,
 											},
 										});
+
+										// send webhook event with full created record data
+										if (created) {
+											await sendWebhookEvent(
+												ctx.context.adapter,
+												opts,
+												`${modelMapping.model}.created` as any,
+												created,
+												ctx.context.tables?.[modelMapping.model]?.fields,
+											);
+										}
 									} else if (onMissing === "delete") {
 										// send delete event back to Attio to remove orphaned record
 										await sendWebhookEvent(

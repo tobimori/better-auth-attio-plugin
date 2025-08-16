@@ -481,13 +481,42 @@ export const attio = (opts: AttioPluginOptions) => {
 
 						return ctx.json({
 							success: true,
-							message: "Session revoked successfully",
 						});
 					} catch (_) {
+						return ctx.error("INTERNAL_SERVER_ERROR");
+					}
+				},
+			),
+
+			/**
+			 * Revoke all sessions for multiple users
+			 */
+			revokeAllSessions: createAuthEndpoint(
+				"/attio/revoke-all-sessions",
+				{
+					method: "POST",
+					body: z.object({
+						secret: z.string(),
+						userIds: z.array(z.string()),
+					}),
+				},
+				async (ctx) => {
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
+
+					try {
+						// delete sessions for all users
+						await Promise.all(
+							ctx.body.userIds.map((userId) =>
+								ctx.context.internalAdapter.deleteSessions(userId),
+							),
+						);
+
 						return ctx.json({
-							success: false,
-							message: "Failed to revoke session",
+							success: true,
 						});
+					} catch (_) {
+						return ctx.error("INTERNAL_SERVER_ERROR");
 					}
 				},
 			),

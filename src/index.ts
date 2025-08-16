@@ -8,6 +8,7 @@ import {
 } from "better-auth/plugins";
 import { z } from "zod";
 import type { FieldMapping } from "./helpers/field-mappings";
+import { getIp } from "./helpers/get-request-ip";
 import {
 	getReverseFieldMapping,
 	mapAttioDataToBetterAuth,
@@ -671,7 +672,6 @@ export const attio = (opts: AttioPluginOptions) => {
 						const impersonationDuration =
 							adminPlugin?.options?.impersonationSessionDuration || 60 * 60; // default 1 hour
 
-						// create impersonation session
 						const expiresAt = new Date(
 							Date.now() + impersonationDuration * 1000,
 						);
@@ -686,8 +686,6 @@ export const attio = (opts: AttioPluginOptions) => {
 							},
 							true,
 						);
-
-						console.log(session);
 
 						if (!session) {
 							return ctx.json(
@@ -732,6 +730,26 @@ export const attio = (opts: AttioPluginOptions) => {
 						if (!sessionData?.session) {
 							return ctx.redirect("/?error=invalid_session");
 						}
+
+						// only allow if session was created by Attio and hasn't been used yet
+						if (!sessionData.session.userAgent?.includes("Attio")) {
+							return ctx.redirect("/?error=session_already_used");
+						}
+
+						// update the session with real user agent and IP from this request
+						const realUserAgent = ctx.headers?.get("user-agent") || "";
+						const realIpAddress = ctx.headers
+							? getIp(ctx.headers, ctx.context.options)
+							: "";
+
+						await ctx.context.adapter.update({
+							model: "session",
+							where: [{ field: "token", value: ctx.query.token }],
+							update: {
+								userAgent: realUserAgent,
+								ipAddress: realIpAddress,
+							},
+						});
 
 						const authCookies = ctx.context.authCookies;
 

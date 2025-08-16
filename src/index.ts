@@ -8,7 +8,6 @@ import {
 import { z } from "zod";
 import { validateSecret } from "./helpers/secret";
 import { sendWebhookEvent } from "./helpers/send-event";
-import { validateWebhookSignature } from "./helpers/webhook";
 
 export type AttioPluginOptions = {
 	/**
@@ -112,10 +111,6 @@ export const attio = (opts: AttioPluginOptions) => {
 						required: true,
 						unique: true,
 					},
-					webhookSecret: {
-						type: "string",
-						required: true,
-					},
 				},
 			},
 
@@ -154,7 +149,6 @@ export const attio = (opts: AttioPluginOptions) => {
 					body: z.object({
 						secret: z.string(),
 						webhookUrl: z.url(),
-						webhookSecret: z.string(),
 					}),
 				},
 				async (ctx) => {
@@ -165,7 +159,6 @@ export const attio = (opts: AttioPluginOptions) => {
 						model: "attioIntegration",
 						data: {
 							webhookUrl: ctx.body.webhookUrl,
-							webhookSecret: ctx.body.webhookSecret,
 						},
 					});
 
@@ -230,34 +223,22 @@ export const attio = (opts: AttioPluginOptions) => {
 				"/attio/webhook",
 				{
 					method: "POST",
-					body: z.any(),
-					requireHeaders: true,
+					body: z.object({
+						webhook_id: z.string(),
+						events: z.array(z.any()),
+						secret: z.string(),
+					}),
 				},
 				async (ctx) => {
-					// get signature from headers
-					const signature =
-						ctx.headers?.get("attio-signature") ||
-						ctx.headers?.get("x-attio-signature");
-
-					if (!signature || typeof signature !== "string") {
-						return ctx.error("UNAUTHORIZED", { message: "Missing signature" });
-					}
-
-					// validate webhook signature
-					const bodyString = JSON.stringify(ctx.body);
-					const isValid = await validateWebhookSignature(
-						ctx.context.adapter,
-						signature,
-						bodyString,
-					);
-
-					if (!isValid) {
-						return ctx.error("UNAUTHORIZED", { message: "Invalid signature" });
-					}
+					// validate using secret from body
+					const { secret, ...webhookData } = ctx.body;
+					
+					const error = validateSecret(opts, ctx);
+					if (error) return error;
 
 					console.log(
 						"[Attio Webhook] Full event data:",
-						JSON.stringify(ctx.body, null, 2),
+						JSON.stringify(webhookData, null, 2),
 					);
 
 					return ctx.json({ success: true });

@@ -1,6 +1,6 @@
 import type { AuthContext } from "better-auth";
-import type { AttioPluginOptions } from "../index";
 import type { ModelAdapter, SyncEvent } from "../adapters/types";
+import type { AttioPluginOptions } from "../index";
 
 export const sendWebhookEvent = async (
 	event: SyncEvent,
@@ -30,7 +30,7 @@ export const sendWebhookEvent = async (
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
-						event: `${modelAdapter.betterAuthModel}.${event}`,
+						event,
 						data: attioData,
 						timestamp: new Date().toISOString(),
 						adapter: {

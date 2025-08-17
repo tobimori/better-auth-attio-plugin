@@ -1,5 +1,4 @@
 import type { ModelAdapter } from "./types";
-import { extractAttioValue } from "./utils";
 
 export const userAdapter: ModelAdapter = {
 	betterAuthModel: "user",
@@ -11,6 +10,7 @@ export const userAdapter: ModelAdapter = {
 		}
 
 		return {
+			record_id: values.attioId as string,
 			user_id: values.id,
 			primary_email_address: values.email,
 			name: values.name,
@@ -21,23 +21,19 @@ export const userAdapter: ModelAdapter = {
 	fromAttio: async (event, values, ctx) => {
 		if (event === "delete") {
 			// return minimal data needed for deletion
-			const userId = extractAttioValue(values.user_id);
-			return { id: userId };
+			return { id: values.user_id };
 		}
-
-		// extract values from Attio format
-		const email = extractAttioValue(values.primary_email_address);
-		const name = extractAttioValue(values.name);
-		const emailVerified = extractAttioValue(values.email_verified);
 
 		const base: Record<string, unknown> = {
 			attioId: values.record_id,
 		};
 
 		// only include non-null values
-		if (email !== null) base.email = email;
-		if (name !== null) base.name = name;
-		if (emailVerified !== null) base.emailVerified = emailVerified;
+		if (values.primary_email_address !== null)
+			base.email = values.primary_email_address;
+		if (values.name !== null) base.name = values.name;
+		if (values.email_verified !== null)
+			base.emailVerified = values.email_verified;
 
 		if (event === "create") {
 			// add creation-specific fields

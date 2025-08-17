@@ -208,6 +208,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 							const created = await ctx.context.adapter.create({
 								model: adapter.betterAuthModel,
 								data: result,
+								forceAllowId: true,
 							});
 
 							// trigger webhook for creation

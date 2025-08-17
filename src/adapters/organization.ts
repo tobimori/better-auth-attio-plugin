@@ -1,12 +1,12 @@
 import type { User } from "better-auth";
 import type { Member, Organization } from "better-auth/plugins";
 import type { ModelAdapter } from "./types";
-import { extractAttioValue, generateSlug, generateUniqueSlug } from "./utils";
+import { generateSlug, generateUniqueSlug } from "./utils";
 
 export const organizationAdapter: ModelAdapter = {
 	betterAuthModel: "organization",
 	attioObject: "workspaces",
-	
+
 	relatedModels: {
 		member: (values) => values.organizationId as string | null,
 	},
@@ -34,6 +34,7 @@ export const organizationAdapter: ModelAdapter = {
 		}
 
 		return {
+			record_id: values.attioId as string,
 			workspace_id: values.id,
 			name: values.name,
 			slug: values.slug,
@@ -44,7 +45,6 @@ export const organizationAdapter: ModelAdapter = {
 
 	fromAttio: async (event, values, ctx) => {
 		if (event === "delete") {
-			// find and delete organization and all its members
 			const org = (await ctx.adapter.findOne({
 				model: "organization",
 				where: [{ field: "attioId", value: values.record_id as string }],
@@ -67,21 +67,15 @@ export const organizationAdapter: ModelAdapter = {
 			return null; // skip default flow
 		}
 
-		// extract organization data from Attio format
-		const name = extractAttioValue(values.name);
-		const slug = extractAttioValue(values.slug);
-		const logo = extractAttioValue(values.avatar_url);
-		const userRefs: string[] = (values.users as string[]) || []; // array of Attio user record IDs
-
 		// organization data
 		const orgData: Record<string, unknown> = {
 			attioId: values.record_id,
 		};
 
 		// only include non-null values
-		if (name !== null) orgData.name = name;
-		if (slug !== null) orgData.slug = slug;
-		if (logo !== null) orgData.logo = logo;
+		if (values.name !== null) orgData.name = values.name;
+		if (values.slug !== null) orgData.slug = values.slug;
+		if (values.avatar_url !== null) orgData.logo = values.avatar_url;
 
 		let orgId: string;
 
@@ -91,7 +85,7 @@ export const organizationAdapter: ModelAdapter = {
 
 			// check for slug uniqueness
 			const slugToUse =
-				orgData.slug || generateSlug(String(orgData.name || "org")) || "";
+				values.slug || generateSlug(String(values.name || "org")) || "";
 			const existingSlug = await ctx.adapter.findOne({
 				model: "organization",
 				where: [{ field: "slug", value: slugToUse as string }],
@@ -99,11 +93,12 @@ export const organizationAdapter: ModelAdapter = {
 
 			const created = await ctx.adapter.create({
 				model: "organization",
+				forceAllowId: true,
 				data: {
 					...orgData,
 					id: orgId,
 					slug: existingSlug
-						? generateUniqueSlug(String(orgData.name || "org"))
+						? generateUniqueSlug(String(values.name || "org"))
 						: slugToUse,
 					createdAt: new Date(),
 					updatedAt: new Date(),
@@ -118,10 +113,14 @@ export const organizationAdapter: ModelAdapter = {
 			})) as Organization | null;
 
 			if (!existingOrg) {
-				// this will be handled by the global sync logic based on onMissing
-				// if onMissing is "create", the sync handler will call this adapter again with event="create"
-				// if onMissing is "ignore" or "delete", the sync handler will handle it
-				return orgData;
+				return {
+					...orgData,
+					id: ctx.generateId({ model: "organization" }) || "",
+					name: values.name || "Unnamed Organization",
+					slug: values.slug || generateSlug(String(values.name || "org")) || "",
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
 			}
 
 			orgId = existingOrg.id;
@@ -148,6 +147,7 @@ export const organizationAdapter: ModelAdapter = {
 		const newUserIds = new Set<string>();
 
 		// resolve Attio user IDs to Better Auth user IDs
+		const userRefs = (values.users as string[]) || [];
 		for (const attioUserId of userRefs) {
 			const user = (await ctx.adapter.findOne({
 				model: "user",
@@ -190,7 +190,7 @@ export const organizationAdapter: ModelAdapter = {
 			}
 		}
 
-		return null; // we handled everything, skip default flow
+		return { id: orgId, attioId: values.record_id };
 	},
 
 	attioSchema: {

@@ -269,6 +269,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
 				const invitation = await ctx.context.adapter.create({
 					model: "invitation",
+					forceAllowId: true,
 					data: {
 						id: invitationId,
 						email: ctx.body.email.toLowerCase(),

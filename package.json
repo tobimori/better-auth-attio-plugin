@@ -15,11 +15,9 @@
     "url": "https://github.com/tobimori/better-auth-attio-plugin/issues"
   },
   "keywords": [
-    "effect",
+    "better-auth",
     "attio",
-    "api",
-    "sdk",
-    "typescript"
+    "api"
   ],
   "workspaces": [
     "playground"

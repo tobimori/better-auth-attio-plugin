@@ -26,6 +26,13 @@ export type AttioPluginOptions = {
 	 * @see https://vercel.com/changelog/waituntil-is-now-available-for-vercel-functions
 	 */
 	waitUntil?: (promise: Promise<unknown>) => void;
+
+	/**
+	 * URL to redirect users to after clicking the password reset link
+	 * This should be your application's password reset page
+	 * Defaults to "/reset-password"
+	 */
+	passwordResetRedirectTo?: string;
 };
 
 export const attio = (opts: AttioPluginOptions) => {

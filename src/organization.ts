@@ -7,7 +7,6 @@ import {
 } from "better-auth/plugins";
 import { z } from "zod";
 import type { AttioPluginOptions } from ".";
-import { getIp } from "./helpers/get-request-ip";
 import { validateSecret } from "./helpers/secret";
 
 /**
@@ -59,18 +58,20 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					(inv) => inv.status === "pending" && new Date(inv.expiresAt) > now,
 				);
 
-				const inviterIds = [...new Set(
-					activeInvitations
-						.map((inv) => inv.inviterId)
-						.filter((id): id is string => !!id)
-				)];
+				const inviterIds = [
+					...new Set(
+						activeInvitations
+							.map((inv) => inv.inviterId)
+							.filter((id): id is string => !!id),
+					),
+				];
 
 				const inviterMap = new Map();
 				if (inviterIds.length) {
 					const inviters = await Promise.all(
-						inviterIds.map(id => 
-							ctx.context.internalAdapter.findUserById(id)
-						)
+						inviterIds.map((id) =>
+							ctx.context.internalAdapter.findUserById(id),
+						),
 					);
 					inviterIds.forEach((id, index) => {
 						const inviter = inviters[index];
@@ -88,9 +89,10 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 				const sortedInvitations = activeInvitations
 					.map((invitation) => ({
 						...invitation,
-						inviter: invitation.inviterId && inviterMap.has(invitation.inviterId)
-							? { ...inviterMap.get(invitation.inviterId) }
-							: null,
+						inviter:
+							invitation.inviterId && inviterMap.has(invitation.inviterId)
+								? { ...inviterMap.get(invitation.inviterId) }
+								: null,
 					}))
 					.sort((a, b) => {
 						const dateA = new Date(a.expiresAt).getTime();
@@ -396,82 +398,6 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			return ctx.json({
 				roles,
 			});
-		},
-	),
-
-	/**
-	 * Set impersonation session cookie from token
-	 */
-	setImpersonationSession: createAuthEndpoint(
-		"/attio/impersonation-session",
-		{
-			method: "GET",
-			query: z.object({
-				token: z.string(),
-			}),
-		},
-		async (ctx) => {
-			try {
-				// find the session to validate it exists
-				const sessionData = await ctx.context.internalAdapter.findSession(
-					ctx.query.token,
-				);
-
-				if (!sessionData?.session) {
-					return ctx.redirect("/?error=invalid_session");
-				}
-
-				// only allow if session was created by Attio and hasn't been used yet
-				if (!sessionData.session.userAgent?.includes("Attio")) {
-					return ctx.redirect("/?error=session_already_used");
-				}
-
-				// update the session with real user agent and IP from this request
-				const realUserAgent = ctx.headers?.get("user-agent") || "";
-				const realIpAddress = ctx.headers
-					? getIp(ctx.headers, ctx.context.options)
-					: "";
-
-				await ctx.context.adapter.update({
-					model: "session",
-					where: [{ field: "token", value: ctx.query.token }],
-					update: {
-						userAgent: realUserAgent,
-						ipAddress: realIpAddress,
-					},
-				});
-
-				const authCookies = ctx.context.authCookies;
-
-				// if there's an existing session, save it as admin_session
-				if (ctx.context.session?.session) {
-					const dontRememberMeCookie = await ctx.getSignedCookie(
-						ctx.context.authCookies.dontRememberToken.name,
-						ctx.context.secret,
-					);
-					const adminCookieProp = ctx.context.createAuthCookie("admin_session");
-					await ctx.setSignedCookie(
-						adminCookieProp.name,
-						`${ctx.context.session.session.token}:${dontRememberMeCookie || ""}`,
-						ctx.context.secret,
-						authCookies.sessionToken.options,
-					);
-				}
-
-				// set the impersonation session cookie
-				await ctx.setSignedCookie(
-					authCookies.sessionToken.name,
-					sessionData.session.token,
-					ctx.context.secret,
-					authCookies.sessionToken.options,
-				);
-
-				// redirect to the app's base URL
-				return ctx.redirect("/");
-			} catch (_) {
-				const baseUrl = ctx.request?.headers.get("referer") || "/";
-				return ctx.redirect(`${baseUrl}?error=session_failed`);
-			}
 		},
 	),
 });

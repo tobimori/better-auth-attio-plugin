@@ -43,6 +43,7 @@ export const auth = betterAuth({
     attio({
       secret: process.env.ATTIO_SECRET, // Shared secret for authentication from step 1
       waitUntil: ctx.waitUntil, // Defer sync until after response is sent, for edge environments like Cloudflare Workers
+      passwordResetRedirectTo: "/reset-password", // Optional: URL where users reset their password (defaults to "/reset-password")
     }),
     // You'll also want the admin, and organization plugins for full functionality
     admin(),

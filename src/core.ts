@@ -1,4 +1,5 @@
 import type { User } from "better-auth";
+import { generateId } from "better-auth";
 import {
 	createAuthEndpoint,
 	type SessionWithImpersonatedBy,
@@ -243,6 +244,81 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			}
 
 			return ctx.json({ success: true });
+		},
+	),
+
+	/**
+	 * Send password reset email to a user
+	 */
+	sendPasswordReset: createAuthEndpoint(
+		"/attio/send-password-reset",
+		{
+			method: "POST",
+			body: z.object({
+				secret: z.string(),
+				userId: z.string(),
+			}),
+		},
+		async (ctx) => {
+			const error = validateSecret(opts, ctx);
+			if (error) return error;
+
+			if (!ctx.context.options.emailAndPassword?.sendResetPassword) {
+				return ctx.error("NOT_IMPLEMENTED", {
+					message: "Password reset is not enabled",
+				});
+			}
+
+			try {
+				const user = await ctx.context.internalAdapter.findUserById(
+					ctx.body.userId,
+				);
+
+				if (!user || !user.email) {
+					return ctx.error("NOT_FOUND", {
+						message: "User not found or has no email address",
+					});
+				}
+
+				const defaultExpiresIn = 60 * 60 * 1;
+				const expiresInSeconds =
+					ctx.context.options.emailAndPassword.resetPasswordTokenExpiresIn ||
+					defaultExpiresIn;
+				const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
+				const verificationToken = generateId(24);
+
+				await ctx.context.internalAdapter.createVerificationValue(
+					{
+						value: user.id,
+						identifier: `reset-password:${verificationToken}`,
+						expiresAt,
+					},
+					ctx,
+				);
+
+				const redirectTo = opts.passwordResetRedirectTo || "/reset-password";
+				const callbackURL = encodeURIComponent(redirectTo);
+				const url = `${ctx.context.baseURL}/reset-password/${verificationToken}?callbackURL=${callbackURL}`;
+
+				await ctx.context.options.emailAndPassword.sendResetPassword(
+					{
+						user,
+						url,
+						token: verificationToken,
+					},
+					ctx.request,
+				);
+
+				return ctx.json({
+					success: true,
+					message: "Password reset email sent successfully",
+				});
+			} catch (error) {
+				console.error("Error sending password reset:", error);
+				return ctx.error("INTERNAL_SERVER_ERROR", {
+					message: "Failed to send password reset email",
+				});
+			}
 		},
 	),
 

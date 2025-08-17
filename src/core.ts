@@ -262,19 +262,39 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 				ctx.body.userId,
 			);
 
-			const now = new Date();
-			const activeSessions = sessions.filter(
-				(s) => !s.expiresAt || new Date(s.expiresAt) > now,
-			);
+			const impersonatorIds = [...new Set(
+				sessions
+					.map(s => s.impersonatedBy)
+					.filter(Boolean)
+			)];
 
+			const userMap = new Map();
+			if (impersonatorIds.length) {
+				const users = await ctx.context.adapter.findMany({
+					model: "user",
+					where: impersonatorIds.map(id => ({ field: "id", value: id })),
+				});
+				users.forEach(user => 
+					userMap.set(user.id, user.name || user.email || user.id)
+				);
+			}
+
+			const enhancedSessions = sessions.map(session => ({
+				...session,
+				impersonatedBy: session.impersonatedBy && 
+					(userMap.get(session.impersonatedBy) || session.impersonatedBy)
+			}));
+
+			const now = new Date();
 			return ctx.json({
-				sessions: [...sessions].sort((a, b) => {
-					const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-					const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-					return tb - ta;
-				}),
+				sessions: enhancedSessions.sort((a, b) => 
+					(b.createdAt ? new Date(b.createdAt).getTime() : 0) -
+					(a.createdAt ? new Date(a.createdAt).getTime() : 0)
+				),
 				totalCount: sessions.length,
-				activeCount: activeSessions.length,
+				activeCount: sessions.filter(s => 
+					!s.expiresAt || new Date(s.expiresAt) > now
+				).length,
 			});
 		},
 	),

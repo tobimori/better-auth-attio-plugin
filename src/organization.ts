@@ -59,33 +59,37 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					(inv) => inv.status === "pending" && new Date(inv.expiresAt) > now,
 				);
 
+				const inviterIds = [...new Set(
+					activeInvitations
+						.map((inv) => inv.inviterId)
+						.filter((id): id is string => !!id)
+				)];
+
 				const inviterMap = new Map();
-				await Promise.all(
-					Array.from(
-						new Set(
-							activeInvitations
-								.map((inv) => inv.inviterId)
-								.filter((id): id is string => !!id),
-						),
-					).map(async (inviterId) => {
-						const inviter =
-							await ctx.context.internalAdapter.findUserById(inviterId);
+				if (inviterIds.length) {
+					const inviters = await Promise.all(
+						inviterIds.map(id => 
+							ctx.context.internalAdapter.findUserById(id)
+						)
+					);
+					inviterIds.forEach((id, index) => {
+						const inviter = inviters[index];
 						if (inviter) {
-							inviterMap.set(inviterId, {
+							inviterMap.set(id, {
 								id: inviter.id,
 								name: inviter.name,
 								email: inviter.email,
 							});
 						}
-					}),
-				);
+					});
+				}
 
 				// Sort by expiresAt
 				const sortedInvitations = activeInvitations
 					.map((invitation) => ({
 						...invitation,
-						inviter: invitation.inviterId
-							? inviterMap.get(invitation.inviterId) || null
+						inviter: invitation.inviterId && inviterMap.has(invitation.inviterId)
+							? { ...inviterMap.get(invitation.inviterId) }
 							: null,
 					}))
 					.sort((a, b) => {

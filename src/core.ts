@@ -1,7 +1,7 @@
 import { createAuthEndpoint } from "better-auth/plugins";
 import z from "zod";
 import type { AttioPluginOptions } from ".";
-import type { ModelAdapter } from "./adapters/types";
+import type { ModelAdapter, SyncEvent } from "./adapters/types";
 import { extractAttioValue } from "./adapters/utils";
 import { validateSecret } from "./helpers/secret";
 import { sendWebhookEvent } from "./helpers/send-event";
@@ -131,7 +131,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					}
 
 					// determine sync event type
-					let syncEvent: "create" | "update" | "delete";
+					let syncEvent: SyncEvent;
 					if (eventType === "record.created") {
 						syncEvent = "create";
 					} else if (eventType === "record.updated") {

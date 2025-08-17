@@ -59,6 +59,48 @@ In Attio:
 3. Paste the connection string from step 1
 4. The app will automatically set up the required objects and attributes
 
+## Configuration
+
+By default, the plugin syncs users and organizations with predefined field mappings. You can customize this behavior with adapters.
+
+### Custom Adapters
+
+Adapters control how data is transformed between Better Auth and Attio. Use them to:
+- Add custom fields to the sync
+- Change field mappings
+- Sync custom database models to any Attio object
+
+```ts
+import { userAdapter } from "better-auth-attio-plugin/adapters";
+
+attio({
+  secret: process.env.ATTIO_SECRET,
+  adapters: [
+    {
+      ...userAdapter,
+      // Add custom fields to Attio
+      attioSchema: {
+        ...userAdapter.attioSchema,
+        subscription_tier: {
+          type: "text",
+          title: "Subscription Tier",
+        },
+      },
+      // Map data when syncing to Attio
+      toAttio: async (event, values, ctx) => {
+        const base = await userAdapter.toAttio(event, values, ctx);
+        return {
+          ...base,
+          subscription_tier: values.metadata?.tier || "free",
+        };
+      },
+    },
+  ],
+})
+```
+
+> **Note**: You can create adapters for any Better Auth model to sync with any Attio object, not just users and organizations.
+
 ## Support
 
 > [!NOTE]

@@ -10,20 +10,18 @@ export const sendWebhookEvent = async (
   opts: AttioPluginOptions
 ) => {
   try {
-    // Transform data to Attio format
     const attioData = await modelAdapter.toAttio(event, data, ctx)
     if (!attioData) {
       return // Adapter chose not to sync this event
     }
 
-    // Get all registered webhooks
     const webhooks = await ctx.adapter.findMany({
       model: "attioIntegration",
     })
 
-    // Send to each webhook
     const promises = webhooks.map(async (webhook: any) => {
       try {
+        // TODO: might have to replace w/ better-fetch
         const response = await fetch(webhook.webhookUrl, {
           method: "POST",
           headers: {

@@ -1,55 +1,27 @@
-import type { Adapter, User } from "better-auth";
-import type { Member, Organization } from "better-auth/plugins";
+import type { AuthContext } from "better-auth";
 import type { AttioPluginOptions } from "../index";
-import { getMergedFieldMappings } from "./field-mappings";
+import type { ModelAdapter, SyncEvent } from "../adapters/types";
 
-export const sendWebhookEvent = async <T extends string>(
-	adapter: Adapter,
+export const sendWebhookEvent = async (
+	event: SyncEvent,
+	data: Record<string, unknown>,
+	modelAdapter: ModelAdapter,
+	ctx: AuthContext,
 	opts: AttioPluginOptions,
-	event: T,
-	data: T extends "user.created" | "user.updated"
-		? Partial<User>
-		: T extends "organization.created" | "organization.updated"
-			? Partial<Organization>
-			: T extends "member.created" | "member.updated"
-				? Partial<Member>
-				: unknown,
-	// pass schema from context
-	schema?: Record<string, any>,
 ) => {
 	try {
-		// get all registered webhooks
-		const webhooks = await adapter.findMany({
+		// Transform data to Attio format
+		const attioData = await modelAdapter.toAttio(event, data, ctx);
+		if (!attioData) {
+			return; // Adapter chose not to sync this event
+		}
+
+		// Get all registered webhooks
+		const webhooks = await ctx.adapter.findMany({
 			model: "attioIntegration",
 		});
 
-		// get merged field mappings
-		const fieldMappings = getMergedFieldMappings(opts.objects);
-
-		// extract model name from event (e.g., "user.created" -> "user")
-		const modelName = event.split(".")[0];
-
-		// get the field mapping for this model
-		const fieldMapping = fieldMappings[modelName];
-
-		// if we have a field mapping and schema, add the schema info
-		if (fieldMapping && schema) {
-			// extract type information for mapped fields only
-			const fieldTypes: Record<string, string> = {};
-
-			for (const [betterAuthField, attioField] of Object.entries(
-				fieldMapping.fields,
-			)) {
-				const fieldSchema = schema[betterAuthField];
-				if (fieldSchema?.type) {
-					fieldTypes[attioField] = fieldSchema.type;
-				}
-			}
-
-			fieldMapping.schema = fieldTypes;
-		}
-
-		// send event to each webhook
+		// Send to each webhook
 		const promises = webhooks.map(async (webhook: any) => {
 			try {
 				const response = await fetch(webhook.webhookUrl, {
@@ -58,10 +30,14 @@ export const sendWebhookEvent = async <T extends string>(
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
-						event,
-						data,
+						event: `${modelAdapter.betterAuthModel}.${event}`,
+						data: attioData,
 						timestamp: new Date().toISOString(),
-						fieldMapping: fieldMapping || null,
+						adapter: {
+							betterAuthModel: modelAdapter.betterAuthModel,
+							attioObject: modelAdapter.attioObject,
+							attioSchema: modelAdapter.attioSchema,
+						},
 					}),
 				});
 
@@ -73,7 +49,6 @@ export const sendWebhookEvent = async <T extends string>(
 			}
 		});
 
-		// use waitUntil if available, otherwise await
 		if (opts.waitUntil) {
 			opts.waitUntil(Promise.all(promises));
 		} else {

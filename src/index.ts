@@ -1,17 +1,10 @@
-import type { User } from "better-auth";
-import type {
-	BetterAuthPlugin,
-	Member,
-	Organization,
-} from "better-auth/plugins";
+import type { BetterAuthPlugin } from "better-auth/plugins";
+import { getAdapters } from "./adapters/helpers";
+import type { ModelAdapter } from "./adapters/types";
 import { endpoints as adminEndpoints } from "./admin";
 import { endpoints } from "./core";
-import type { FieldMapping } from "./helpers/field-mappings";
 import { sendWebhookEvent } from "./helpers/send-event";
-import {
-	getOrganizationPlugin,
-	endpoints as organizationEndpoints,
-} from "./organization";
+import { endpoints as organizationEndpoints } from "./organization";
 
 export type AttioPluginOptions = {
 	/**
@@ -20,35 +13,11 @@ export type AttioPluginOptions = {
 	secret?: string;
 
 	/**
-	 * Attio object configuration for syncing Better Auth data
-	 * Maps Better Auth models to Attio objects with field mappings
-	 * Fields will be automatically created in Attio if they don't exist
+	 * Model adapters for bidirectional sync
+	 * Each adapter handles transformation and sync logic for a specific model
+	 * Defaults are provided for user and organization models
 	 */
-	objects?: {
-		user?: Partial<FieldMapping>;
-		workspace?: Partial<FieldMapping>;
-		/**
-		 * Additional custom objects to sync
-		 * Key is the Better Auth model name
-		 */
-		[key: string]: Partial<FieldMapping> | undefined;
-	}; // TODO: adapter pattern.
-
-	/**
-	 * What to do when a record from Attio doesn't exist in Better Auth
-	 * - 'create': Create a new record in Better Auth (default)
-	 * - 'delete': Delete the orphaned record from Attio
-	 * - 'ignore': Skip and log
-	 * @default 'create'
-	 */
-	onMissing?: "create" | "delete" | "ignore";
-
-	/**
-	 * Whether to sync deletions between systems
-	 * When true, deleting a record in one system will delete it in the other
-	 * @default true
-	 */
-	syncDeletions?: boolean;
+	adapters?: ModelAdapter[];
 
 	/**
 	 * Optional handler to schedule work to run after the response is sent.
@@ -60,89 +29,82 @@ export type AttioPluginOptions = {
 };
 
 export const attio = (opts: AttioPluginOptions) => {
+	const adapters = getAdapters(opts.adapters);
+
 	return {
 		id: "attio",
 		init: (ctx) => ({
 			options: {
-				databaseHooks: {
-					user: {
-						create: {
-							after: async (user: Partial<User>) => {
-								await sendWebhookEvent(
-									ctx.adapter,
-									opts,
-									"user.created",
-									user,
-									ctx.tables.user?.fields,
-								);
-							},
-						},
-						update: {
-							after: async (user: Partial<User>) => {
-								await sendWebhookEvent(
-									ctx.adapter,
-									opts,
-									"user.updated",
-									user,
-									ctx.tables.user?.fields,
-								);
-							},
-						},
-					},
+				databaseHooks: (() => {
+					const hooks: Record<string, any> = {};
 
-					...(getOrganizationPlugin(ctx)
-						? {
-								organization: {
-									create: {
-										after: async (organization: Partial<Organization>) => {
-											await sendWebhookEvent(
-												ctx.adapter,
-												opts,
-												"organization.created",
-												organization,
-												ctx.tables.organization?.fields,
-											);
-										},
-									},
-									update: {
-										after: async (organization: Partial<Organization>) => {
-											await sendWebhookEvent(
-												ctx.adapter,
-												opts,
-												"organization.updated",
-												organization,
-												ctx.tables.organization?.fields,
-											);
-										},
-									},
+					// Create hooks for each adapter's main model
+					for (const adapter of adapters) {
+						hooks[adapter.betterAuthModel] = {
+							create: {
+								after: async (data: Record<string, unknown>) => {
+									await sendWebhookEvent("create", data, adapter, ctx, opts);
 								},
-								member: {
-									create: {
-										after: async (member: Partial<Member>) => {
-											await sendWebhookEvent(
-												ctx.adapter,
-												opts,
-												"member.created",
-												member,
-												ctx.tables.member?.fields,
-											);
-										},
-									},
-									update: {
-										after: async (member: Partial<Member>) => {
-											await sendWebhookEvent(
-												ctx.adapter,
-												opts,
-												"member.updated",
-												member,
-												ctx.tables.member?.fields,
-											);
-										},
-									},
+							},
+							update: {
+								after: async (data: Record<string, unknown>) => {
+									await sendWebhookEvent("update", data, adapter, ctx, opts);
 								},
+							},
+							delete: {
+								after: async (data: Record<string, unknown>) => {
+									await sendWebhookEvent("delete", data, adapter, ctx, opts);
+								},
+							},
+						};
+					}
+
+					// Create hooks for related models
+					for (const adapter of adapters) {
+						if (adapter.relatedModels) {
+							for (const [model, getRelationId] of Object.entries(
+								adapter.relatedModels,
+							)) {
+								if (!hooks[model]) {
+									hooks[model] = {};
+								}
+
+								const triggerParentSync = async (
+									data: Record<string, unknown>,
+								) => {
+									const relationId = getRelationId(data);
+									if (relationId) {
+										const parent = (await ctx.adapter.findOne({
+											model: adapter.betterAuthModel,
+											where: [{ field: "id", value: relationId }],
+										})) as Record<string, unknown> | null;
+										if (parent) {
+											const attioData = await adapter.toAttio(
+												"update",
+												parent,
+												ctx,
+											);
+											if (attioData) {
+												await sendWebhookEvent(
+													ctx.adapter,
+													opts,
+													`${adapter.betterAuthModel}.updated` as any,
+													attioData,
+													adapter,
+												);
+											}
+										}
+									}
+								};
+
+								hooks[model].create = { after: triggerParentSync };
+								hooks[model].delete = { after: triggerParentSync };
 							}
-						: {}),
-				},
+						}
+					}
+
+					return hooks;
+				})(),
 			},
 		}),
 		schema: {
@@ -177,7 +139,7 @@ export const attio = (opts: AttioPluginOptions) => {
 			},
 		},
 		endpoints: {
-			...endpoints(opts),
+			...endpoints(opts, adapters),
 			...adminEndpoints(opts),
 			...organizationEndpoints(opts),
 		},

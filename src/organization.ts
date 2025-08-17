@@ -80,7 +80,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					}),
 				);
 
-				// Sort by createdAt or expiresAt (newest first)
+				// Sort by expiresAt
 				const sortedInvitations = activeInvitations
 					.map((invitation) => ({
 						...invitation,
@@ -89,8 +89,8 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 							: null,
 					}))
 					.sort((a, b) => {
-						const dateA = new Date(a.createdAt || a.expiresAt).getTime();
-						const dateB = new Date(b.createdAt || b.expiresAt).getTime();
+						const dateA = new Date(a.expiresAt).getTime();
+						const dateB = new Date(b.expiresAt).getTime();
 						return dateB - dateA;
 					});
 

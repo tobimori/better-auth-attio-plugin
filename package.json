@@ -28,7 +28,8 @@
     "ci": "bun run fix && bun run build",
     "prepublishOnly": "bun run ci",
     "local-release": "changeset version && changeset publish",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "release": "bun run build && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",

@@ -24,11 +24,12 @@
   ],
   "scripts": {
     "build": "tsc",
-    "fix": "biome check --fix",
+    "fix": "bun biome check --fix",
     "ci": "bun run fix && bun run build",
     "prepublishOnly": "bun run ci"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
     "typescript": "^5.9.2"
   },
   "peerDependencies": {

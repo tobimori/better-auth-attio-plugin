@@ -38,22 +38,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Create GitHub Release
-        if: steps.changesets.outputs.published == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const publishedPackages = JSON.parse('${{ steps.changesets.outputs.publishedPackages }}');
-            for (const pkg of publishedPackages) {
-              await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: `${pkg.version}`,
-                name: `${pkg.version}`,
-                draft: false,
-                prerelease: false,
-                generate_release_notes: true
-              });
-            }

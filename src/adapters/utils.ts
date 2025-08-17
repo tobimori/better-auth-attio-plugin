@@ -3,34 +3,32 @@
  * Attio returns values as arrays with history/metadata
  */
 export function extractAttioValue(fieldData: unknown): unknown {
-	// if it's an array with at least one item
-	if (Array.isArray(fieldData) && fieldData.length > 0) {
-		const firstItem = fieldData[0];
-
-		// handle different attribute types based on Attio's response format
-		if (firstItem.attribute_type === "email-address") {
-			// for email, use the email_address field
-			return firstItem.email_address;
-		} else if (firstItem.attribute_type === "phone-number") {
-			// for phone numbers
-			return firstItem.phone_number || firstItem.original_phone_number;
-		} else if (firstItem.attribute_type === "record-reference") {
-			// for record references, return the target record ID
-			return firstItem.target_record_id;
-		} else if (firstItem.attribute_type === "personal-name") {
-			// for personal names, return the full name
-			return firstItem.full_name;
-		} else if ("value" in firstItem) {
-			// for most fields, use the value property
-			return firstItem.value;
-		} else if ("referenced_actor_id" in firstItem) {
-			// for actor references, use the referenced actor id
-			return firstItem.referenced_actor_id;
-		}
+	if (!Array.isArray(fieldData) || fieldData.length === 0) {
+		return null;
 	}
 
-	// if empty array or not an array, return null
-	return null;
+	const extractSingleValue = (item: any) => {
+		if (item.attribute_type === "email-address") {
+			return item.email_address;
+		} else if (item.attribute_type === "phone-number") {
+			return item.phone_number || item.original_phone_number;
+		} else if (item.attribute_type === "record-reference") {
+			return item.target_record_id;
+		} else if (item.attribute_type === "personal-name") {
+			return item.full_name;
+		} else if ("value" in item) {
+			return item.value;
+		} else if ("referenced_actor_id" in item) {
+			return item.referenced_actor_id;
+		}
+		return null;
+	};
+
+	if (fieldData.length === 1) {
+		return extractSingleValue(fieldData[0]);
+	}
+	
+	return fieldData.map(extractSingleValue);
 }
 
 /**

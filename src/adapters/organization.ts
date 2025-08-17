@@ -39,7 +39,10 @@ export const organizationAdapter: ModelAdapter = {
 			name: values.name,
 			slug: values.slug,
 			avatar_url: values.logo,
-			users: userAttioIds, // array of Attio user record IDs
+			users: userAttioIds.map((id) => ({
+				target_record_id: id,
+				target_object: "users",
+			})),
 		};
 	},
 
@@ -138,21 +141,29 @@ export const organizationAdapter: ModelAdapter = {
 
 		// sync members based on user references from Attio
 		// get current members
-		const currentMembers = (await ctx.adapter.findMany({
+		const currentMembers: Member[] = await ctx.adapter.findMany({
 			model: "member",
 			where: [{ field: "organizationId", value: orgId }],
-		})) as Member[];
+		});
 
-		const currentUserIds = new Set(currentMembers.map((m: any) => m.userId));
+		const currentUserIds = new Set(currentMembers.map((m) => m.userId));
 		const newUserIds = new Set<string>();
 
 		// resolve Attio user IDs to Better Auth user IDs
-		const userRefs = (values.users as string[]) || [];
+		// handle both single user (string) and multiple users (array)
+		const rawUsers = values.users;
+		const userRefs = rawUsers
+			? Array.isArray(rawUsers)
+				? rawUsers
+				: [rawUsers]
+			: [];
+
 		for (const attioUserId of userRefs) {
 			const user = (await ctx.adapter.findOne({
 				model: "user",
 				where: [{ field: "attioId", value: attioUserId }],
 			})) as User | null;
+
 			if (user) {
 				newUserIds.add(user.id);
 			}
@@ -179,7 +190,6 @@ export const organizationAdapter: ModelAdapter = {
 				await ctx.adapter.create({
 					model: "member",
 					data: {
-						id: ctx.generateId({ model: "member" }),
 						organizationId: orgId,
 						userId,
 						role: "member", // default role

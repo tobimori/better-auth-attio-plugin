@@ -99,7 +99,8 @@ attio({
 })
 ```
 
-> **Note**: You can create adapters for any Better Auth model to sync with any Attio object, not just users and organizations.
+> [!NOTE]
+> You can create adapters for any Better Auth model to sync with any Attio object, not just users and organizations.
 
 ## Support
 

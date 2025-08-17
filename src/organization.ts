@@ -263,9 +263,6 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 				}
 
 				// Create new invitation
-				const invitationId = ctx.context.generateId({
-					model: "invitation",
-				});
 				const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7); // 7 days
 				const role = Array.isArray(ctx.body.role)
 					? ctx.body.role.join(",")
@@ -273,9 +270,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
 				const invitation = await ctx.context.adapter.create({
 					model: "invitation",
-					forceAllowId: true,
 					data: {
-						id: invitationId,
 						email: ctx.body.email.toLowerCase(),
 						role,
 						organizationId: ctx.body.organizationId,

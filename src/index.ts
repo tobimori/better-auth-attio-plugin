@@ -79,20 +79,13 @@ export const attio = (opts: AttioPluginOptions) => {
 											where: [{ field: "id", value: relationId }],
 										})) as Record<string, unknown> | null;
 										if (parent) {
-											const attioData = await adapter.toAttio(
+											await sendWebhookEvent(
 												"update",
 												parent,
+												adapter,
 												ctx,
+												opts,
 											);
-											if (attioData) {
-												await sendWebhookEvent(
-													ctx.adapter,
-													opts,
-													`${adapter.betterAuthModel}.updated` as any,
-													attioData,
-													adapter,
-												);
-											}
 										}
 									}
 								};
@@ -139,7 +132,7 @@ export const attio = (opts: AttioPluginOptions) => {
 			},
 		},
 		endpoints: {
-			...endpoints(opts, adapters),
+			...endpoints({ ...opts, adapters }),
 			...adminEndpoints(opts),
 			...organizationEndpoints(opts),
 		},

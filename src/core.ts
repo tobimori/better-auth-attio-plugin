@@ -1,10 +1,8 @@
 import { createAuthEndpoint } from "better-auth/plugins";
 import z from "zod";
 import type { AttioPluginOptions } from ".";
-import {
-	getReverseFieldMapping,
-	mapAttioDataToBetterAuth,
-} from "./helpers/reverse-mapping";
+import type { ModelAdapter } from "./adapters/types";
+import { extractAttioValue } from "./adapters/utils";
 import { validateSecret } from "./helpers/secret";
 import { sendWebhookEvent } from "./helpers/send-event";
 
@@ -103,11 +101,6 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			const error = validateSecret(opts, ctx);
 			if (error) return error;
 
-			const onMissing = opts.onMissing || "create";
-			const syncDeletions = opts.syncDeletions !== false;
-
-			const reverseMapping = getReverseFieldMapping(opts.objects);
-
 			for (const event of ctx.body.events) {
 				try {
 					const eventType = event.event_type;
@@ -116,116 +109,128 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
 					if (!record || !object) continue;
 
-					const modelMapping = reverseMapping[object.api_slug];
-					if (!modelMapping) continue;
+					// find the adapter for this Attio object
+					let adapter: ModelAdapter | undefined;
+					for (const modelAdapter of opts.adapters ?? []) {
+						if (modelAdapter.attioObject === object.api_slug) {
+							adapter = modelAdapter;
+							break;
+						}
+					}
+
+					if (!adapter) continue;
 
 					const attioId = record.id.record_id;
 
-					const mappedData = mapAttioDataToBetterAuth(
-						record.values,
-						modelMapping.fields,
+					// extract values from Attio format
+					const extractedValues: Record<string, unknown> = {
+						record_id: attioId,
+					};
+					for (const [key, value] of Object.entries(record.values)) {
+						extractedValues[key] = extractAttioValue(value);
+					}
+
+					// determine sync event type
+					let syncEvent: "create" | "update" | "delete";
+					if (eventType === "record.created") {
+						syncEvent = "create";
+					} else if (eventType === "record.updated") {
+						syncEvent = "update";
+					} else if (eventType === "record.deleted") {
+						syncEvent = "delete";
+					} else {
+						continue;
+					}
+
+					// use adapter to transform data
+					const result = await adapter.fromAttio(
+						syncEvent,
+						extractedValues,
+						ctx.context,
 					);
 
-					// always include attioId in mapped data
-					mappedData.attioId = attioId;
+					// if adapter returned null, it handled everything itself
+					if (result === null) {
+						continue;
+					}
 
-					if (
-						eventType === "record.created" ||
-						eventType === "record.updated"
-					) {
-						// check for existing record by attioId or by the actual id
-						let existing = (await ctx.context.adapter.findOne({
-							model: modelMapping.model,
-							where: [{ field: "attioId", value: attioId }],
-						})) as { id: string; [key: string]: unknown };
+					// handle default flow based on sync event
+					if (syncEvent === "delete") {
+						if (adapter.syncDeletions !== false) {
+							const existing = (await ctx.context.adapter.findOne({
+								model: adapter.betterAuthModel,
+								where: [{ field: "attioId", value: attioId }],
+							})) as Record<string, unknown> | null;
 
-						// if not found by attioId and we have an id in the mapped data, check by id
-						if (!existing && mappedData.id) {
-							existing = (await ctx.context.adapter.findOne({
-								model: modelMapping.model,
-								where: [{ field: "id", value: mappedData.id as string }],
-							})) as { id: string; [key: string]: unknown };
+							if (existing) {
+								await ctx.context.adapter.delete({
+									model: adapter.betterAuthModel,
+									where: [{ field: "id", value: existing.id as string }],
+								});
+							}
 						}
+					} else if (syncEvent === "create" || syncEvent === "update") {
+						// check for existing record
+						const existing = (await ctx.context.adapter.findOne({
+							model: adapter.betterAuthModel,
+							where: [{ field: "attioId", value: attioId }],
+						})) as Record<string, unknown> | null;
+
+						// handle onMissing behavior
+						const onMissing = adapter.onMissing || "create";
 
 						if (existing) {
-							// check if there are actual changes (excluding id which can't be updated)
-							const changes: Record<string, unknown> = {};
-							for (const [key, value] of Object.entries(mappedData)) {
-								// skip id field - it's immutable
-								if (key === "id") continue;
+							// update existing record
+							const updateData = { ...result };
+							delete updateData.id; // can't update ID
+							delete updateData.createdAt; // can't update createdAt
 
-								if (existing[key] !== value) {
-									changes[key] = value;
-								}
-							}
+							if (Object.keys(updateData).length > 0) {
+								const updated = (await ctx.context.adapter.update({
+									model: adapter.betterAuthModel,
+									where: [{ field: "id", value: existing.id as string }],
+									update: updateData,
+								})) as Record<string, unknown>;
 
-							// only update if there are changes
-							if (Object.keys(changes).length > 0) {
-								await ctx.context.adapter.update({
-									model: modelMapping.model,
-									where: [{ field: "id", value: existing.id }],
-									update: changes,
-								});
-							}
-						} else if (eventType === "record.created") {
-							// always create on record.created
-							const createData = {
-								...mappedData,
-								attioId,
-							};
-
-							const created = await ctx.context.adapter.create({
-								model: modelMapping.model,
-								data: createData,
-							});
-
-							// send webhook event with full created record data
-							if (created) {
-								await sendWebhookEvent(
-									ctx.context.adapter,
-									opts,
-									`${modelMapping.model}.created` as any,
-									created,
-									ctx.context.tables?.[modelMapping.model]?.fields,
-								);
-							}
-						} else if (eventType === "record.updated") {
-							if (onMissing === "create") {
-								// create new record if onMissing is 'create'
-								const created = await ctx.context.adapter.create({
-									model: modelMapping.model,
-									data: {
-										...mappedData,
-										attioId,
-									},
-								});
-
-								// send webhook event with full created record data
-								if (created) {
+								// trigger webhook for update
+								if (updated) {
 									await sendWebhookEvent(
-										ctx.context.adapter,
+										"update",
+										updated,
+										adapter,
+										ctx.context,
 										opts,
-										`${modelMapping.model}.created` as any,
-										created,
-										ctx.context.tables?.[modelMapping.model]?.fields,
 									);
 								}
-							} else if (onMissing === "delete") {
-								// send delete event back to Attio to remove orphaned record
+							}
+						} else if (syncEvent === "create" || onMissing === "create") {
+							// create new record
+							const created = await ctx.context.adapter.create({
+								model: adapter.betterAuthModel,
+								data: result,
+							});
+
+							// trigger webhook for creation
+							if (created) {
 								await sendWebhookEvent(
-									ctx.context.adapter,
+									"create",
+									created,
+									adapter,
+									ctx.context,
 									opts,
-									`${modelMapping.model}.deleted` as any,
-									{ attioId },
 								);
 							}
-							// if onMissing is 'ignore', do nothing
+						} else if (onMissing === "delete") {
+							// send delete event back to Attio to remove orphaned record
+							await sendWebhookEvent(
+								"delete",
+								{ attioId },
+								adapter,
+								ctx.context,
+								opts,
+							);
 						}
-					} else if (eventType === "record.deleted" && syncDeletions) {
-						await ctx.context.adapter.delete({
-							model: modelMapping.model,
-							where: [{ field: "attioId", value: attioId }],
-						});
+						// if onMissing is 'ignore', do nothing
 					}
 				} catch (error) {
 					console.error(`Error processing event:`, error);

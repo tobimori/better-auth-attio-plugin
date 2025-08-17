@@ -1,4 +1,8 @@
-import { createAuthEndpoint } from "better-auth/plugins";
+import type { User } from "better-auth";
+import {
+	createAuthEndpoint,
+	type SessionWithImpersonatedBy,
+} from "better-auth/plugins";
 import z from "zod";
 import type { AttioPluginOptions } from ".";
 import type { ModelAdapter, SyncEvent } from "./adapters/types";
@@ -258,42 +262,41 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			const error = validateSecret(opts, ctx);
 			if (error) return error;
 
-			const sessions = await ctx.context.internalAdapter.listSessions(
-				ctx.body.userId,
+			const sessions: SessionWithImpersonatedBy[] =
+				await ctx.context.internalAdapter.listSessions(ctx.body.userId);
+
+			const impersonatorIds = [
+				...new Set(sessions.map((s) => s.impersonatedBy).filter(Boolean)),
+			] as string[];
+
+			const users: User[] = impersonatorIds.length
+				? await ctx.context.adapter.findMany({
+						model: "user",
+						where: impersonatorIds.map((id) => ({ field: "id", value: id })),
+					})
+				: [];
+
+			const userMap = Object.fromEntries(
+				users.map((u) => [u.id, u.name || u.email || u.id]),
 			);
 
-			const impersonatorIds = [...new Set(
-				sessions
-					.map(s => s.impersonatedBy)
-					.filter(Boolean)
-			)];
-
-			const userMap = new Map();
-			if (impersonatorIds.length) {
-				const users = await ctx.context.adapter.findMany({
-					model: "user",
-					where: impersonatorIds.map(id => ({ field: "id", value: id })),
-				});
-				users.forEach(user => 
-					userMap.set(user.id, user.name || user.email || user.id)
-				);
-			}
-
-			const enhancedSessions = sessions.map(session => ({
+			const enhancedSessions = sessions.map((session) => ({
 				...session,
-				impersonatedBy: session.impersonatedBy && 
-					(userMap.get(session.impersonatedBy) || session.impersonatedBy)
+				impersonatedBy: session.impersonatedBy
+					? userMap[session.impersonatedBy] || session.impersonatedBy
+					: undefined,
 			}));
 
 			const now = new Date();
 			return ctx.json({
-				sessions: enhancedSessions.sort((a, b) => 
-					(b.createdAt ? new Date(b.createdAt).getTime() : 0) -
-					(a.createdAt ? new Date(a.createdAt).getTime() : 0)
+				sessions: enhancedSessions.sort(
+					(a, b) =>
+						(b.createdAt ? new Date(b.createdAt).getTime() : 0) -
+						(a.createdAt ? new Date(a.createdAt).getTime() : 0),
 				),
 				totalCount: sessions.length,
-				activeCount: sessions.filter(s => 
-					!s.expiresAt || new Date(s.expiresAt) > now
+				activeCount: sessions.filter(
+					(s) => !s.expiresAt || new Date(s.expiresAt) > now,
 				).length,
 			});
 		},

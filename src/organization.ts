@@ -1,7 +1,8 @@
-import type { AuthContext } from "better-auth";
+import type { AuthContext, User } from "better-auth";
 import {
 	createAuthEndpoint,
 	type Invitation,
+	type Member,
 	type organization,
 } from "better-auth/plugins";
 import { z } from "zod";
@@ -38,15 +39,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			if (error) return error;
 
 			if (!getOrganizationPlugin(ctx.context)) {
-				return ctx.json(
-					{
-						error: "ORGANIZATION_PLUGIN_NOT_ENABLED",
-						message: "Organization plugin is required for invitations",
-					},
-					{
-						status: 501,
-					},
-				);
+				return ctx.error("NOT_IMPLEMENTED");
 			}
 
 			try {
@@ -60,18 +53,21 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					],
 				})) as Invitation[];
 
-				// deduplicate inviterIds and fetch each unique inviter only once
-				const uniqueInviterIds = [
-					...new Set(
-						invitations
-							.map((inv) => inv.inviterId)
-							.filter((id): id is string => !!id),
-					),
-				];
+				// Filter for active (non-expired) invitations
+				const now = new Date();
+				const activeInvitations = invitations.filter(
+					(inv) => inv.status === "pending" && new Date(inv.expiresAt) > now,
+				);
 
 				const inviterMap = new Map();
 				await Promise.all(
-					uniqueInviterIds.map(async (inviterId) => {
+					Array.from(
+						new Set(
+							activeInvitations
+								.map((inv) => inv.inviterId)
+								.filter((id): id is string => !!id),
+						),
+					).map(async (inviterId) => {
 						const inviter =
 							await ctx.context.internalAdapter.findUserById(inviterId);
 						if (inviter) {
@@ -84,16 +80,23 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					}),
 				);
 
-				// map invitations with their inviters
-				const invitationsWithInviters = invitations.map((invitation) => ({
-					...invitation,
-					inviter: invitation.inviterId
-						? inviterMap.get(invitation.inviterId) || null
-						: null,
-				}));
+				// Sort by createdAt or expiresAt (newest first)
+				const sortedInvitations = activeInvitations
+					.map((invitation) => ({
+						...invitation,
+						inviter: invitation.inviterId
+							? inviterMap.get(invitation.inviterId) || null
+							: null,
+					}))
+					.sort((a, b) => {
+						const dateA = new Date(a.createdAt || a.expiresAt).getTime();
+						const dateB = new Date(b.createdAt || b.expiresAt).getTime();
+						return dateB - dateA;
+					});
 
 				return ctx.json({
-					invitations: invitationsWithInviters,
+					invitations: sortedInvitations,
+					count: sortedInvitations.length,
 				});
 			} catch (_) {
 				return ctx.error("INTERNAL_SERVER_ERROR");
@@ -118,15 +121,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			if (error) return error;
 
 			if (!getOrganizationPlugin(ctx.context)) {
-				return ctx.json(
-					{
-						error: "ORGANIZATION_PLUGIN_NOT_ENABLED",
-						message: "Organization plugin is required for invitations",
-					},
-					{
-						status: 501,
-					},
-				);
+				return ctx.error("NOT_IMPLEMENTED");
 			}
 
 			try {
@@ -165,23 +160,15 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 				role: z.union([z.string(), z.array(z.string())]),
 				organizationId: z.string(),
 				inviterEmail: z.email(), // Email of the inviter from Attio
-				resend: z.boolean().optional(),
 			}),
 		},
 		async (ctx) => {
 			const error = validateSecret(opts, ctx);
 			if (error) return error;
 
-			if (!getOrganizationPlugin(ctx.context)) {
-				return ctx.json(
-					{
-						error: "ORGANIZATION_PLUGIN_NOT_ENABLED",
-						message: "Organization plugin is required for invitations",
-					},
-					{
-						status: 501,
-					},
-				);
+			const plugin = getOrganizationPlugin(ctx.context);
+			if (!plugin) {
+				return ctx.error("NOT_IMPLEMENTED");
 			}
 
 			try {
@@ -191,19 +178,11 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 				);
 
 				if (!inviterResult?.user) {
-					return ctx.json(
-						{
-							error: "INVITER_NOT_FOUND",
-							message: "Inviter user not found",
-						},
-						{
-							status: 400,
-						},
-					);
+					return ctx.error("NOT_FOUND");
 				}
 
 				// Check if user is already invited
-				const existingInvitations = await ctx.context.adapter.findMany({
+				const existingInvitations = (await ctx.context.adapter.findMany({
 					model: "invitation",
 					where: [
 						{
@@ -219,7 +198,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 							value: "pending",
 						},
 					],
-				});
+				})) as Invitation[];
 
 				// Filter for non-expired invitations
 				const now = new Date();
@@ -227,48 +206,34 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					(inv) => new Date(inv.expiresAt) > now,
 				);
 
-				if (validInvitations.length > 0 && !ctx.body.resend) {
-					return ctx.json(
-						{
-							error: "USER_ALREADY_INVITED",
-							message: "User is already invited to this organization",
-						},
-						{
-							status: 400,
-						},
-					);
-				}
-
 				// Check if user is already a member
-				const existingMember = await ctx.context.adapter.findOne({
-					model: "member",
-					where: [
-						{
-							field: "organizationId",
-							value: ctx.body.organizationId,
-						},
-						{
-							field: "email",
-							value: ctx.body.email.toLowerCase(),
-						},
-					],
-				});
+				const userToInvite = await ctx.context.internalAdapter.findUserByEmail(
+					ctx.body.email.toLowerCase(),
+				);
 
-				if (existingMember) {
-					return ctx.json(
-						{
-							error: "USER_ALREADY_MEMBER",
-							message: "User is already a member of this organization",
-						},
-						{
-							status: 400,
-						},
-					);
+				if (userToInvite?.user) {
+					const existingMember = (await ctx.context.adapter.findOne({
+						model: "member",
+						where: [
+							{
+								field: "organizationId",
+								value: ctx.body.organizationId,
+							},
+							{
+								field: "userId",
+								value: userToInvite.user.id,
+							},
+						],
+					})) as Member | null;
+
+					if (existingMember) {
+						return ctx.error("BAD_REQUEST");
+					}
 				}
 
 				// If resending and invitation exists, update it
-				if (validInvitations.length > 0 && ctx.body.resend) {
-					const existingInvitation = validInvitations[0];
+				if (validInvitations.length > 0) {
+					const existingInvitation = validInvitations[0]!;
 					const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7); // 7 days
 
 					await ctx.context.adapter.update({
@@ -280,7 +245,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 							},
 						],
 						update: {
-							expiresAt: expiresAt.toISOString(),
+							expiresAt,
 							inviterId: inviterResult.user.id,
 						},
 					});
@@ -311,14 +276,11 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 						organizationId: ctx.body.organizationId,
 						inviterId: inviterResult.user.id,
 						status: "pending",
-						expiresAt: expiresAt.toISOString(),
+						expiresAt,
 					},
 				});
 
-				// Trigger the sendInvitationEmail callback if configured
-				const orgPlugin = getOrganizationPlugin(ctx.context);
-				if (orgPlugin && orgPlugin.options?.sendInvitationEmail) {
-					// Get organization details for email
+				if (plugin.options?.sendInvitationEmail) {
 					const organization = await ctx.context.adapter.findOne({
 						model: "organization",
 						where: [
@@ -330,7 +292,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 					});
 
 					if (organization) {
-						await orgPlugin.options.sendInvitationEmail(
+						await plugin.options.sendInvitationEmail(
 							{
 								id: invitation.id,
 								role: invitation.role,
@@ -338,7 +300,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 								organization,
 								inviter: {
 									user: inviterResult.user,
-									role: role, // Inviter's role in the context
+									role: role,
 								},
 								invitation,
 							},
@@ -351,6 +313,89 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 			} catch (_) {
 				return ctx.error("INTERNAL_SERVER_ERROR");
 			}
+		},
+	),
+
+	/**
+	 * Search users
+	 */
+	searchUsers: createAuthEndpoint(
+		"/attio/search-users",
+		{
+			method: "POST",
+			body: z.object({
+				secret: z.string(),
+				search: z.string(),
+			}),
+		},
+		async (ctx) => {
+			const error = validateSecret(opts, ctx);
+			if (error) return error;
+
+			try {
+				const searchTerm = ctx.body.search.toLowerCase();
+
+				// search by email only since we can't do OR conditions
+				const users = (await ctx.context.adapter.findMany({
+					model: "user",
+					where: searchTerm
+						? [
+								{
+									field: "email",
+									value: searchTerm,
+									operator: "contains",
+								},
+							]
+						: undefined,
+					limit: 50,
+					sortBy: {
+						field: "createdAt",
+						direction: "desc",
+					},
+				})) as User[];
+
+				return ctx.json({
+					users: users.map((user) => ({
+						id: user.id,
+						email: user.email,
+						name: user.name,
+						image: user.image,
+					})),
+				});
+			} catch (_) {
+				return ctx.error("INTERNAL_SERVER_ERROR");
+			}
+		},
+	),
+
+	/**
+	 * Get organization roles
+	 */
+	getOrganizationRoles: createAuthEndpoint(
+		"/attio/get-org-roles",
+		{
+			method: "POST",
+			body: z.object({
+				secret: z.string(),
+			}),
+		},
+		async (ctx) => {
+			const error = validateSecret(opts, ctx);
+			if (error) return error;
+
+			const plugin = getOrganizationPlugin(ctx.context);
+			if (!plugin) {
+				return ctx.error("NOT_IMPLEMENTED");
+			}
+
+			// get roles from the organization plugin options
+			const roles = plugin.options?.roles
+				? Object.keys(plugin.options.roles)
+				: ["member", "admin", "owner"];
+
+			return ctx.json({
+				roles,
+			});
 		},
 	),
 
@@ -423,8 +468,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
 				// redirect to the app's base URL
 				return ctx.redirect("/");
-			} catch (error) {
-				console.error("Failed to set impersonation session:", error);
+			} catch (_) {
 				const baseUrl = ctx.request?.headers.get("referer") || "/";
 				return ctx.redirect(`${baseUrl}?error=session_failed`);
 			}

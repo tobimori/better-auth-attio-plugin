@@ -28,9 +28,6 @@
     "ci": "bun run fix && bun run build",
     "prepublishOnly": "bun run ci"
   },
-  "workspaces": [
-    "playground"
-  ],
   "devDependencies": {
     "typescript": "^5.9.2"
   },

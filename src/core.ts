@@ -178,7 +178,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             // this handles the case where a local record exists but doesn't have attioId yet
             if (!existing && adapter.idField && extractedValues[adapter.idField]) {
               const betterAuthId = extractedValues[adapter.idField]
-              if (typeof betterAuthId === 'string') {
+              if (typeof betterAuthId === "string") {
                 existing = (await ctx.context.adapter.findOne({
                   model: adapter.betterAuthModel,
                   where: [{field: "id", value: betterAuthId}],
@@ -377,6 +377,36 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
       try {
         await ctx.context.internalAdapter.deleteSession(ctx.body.sessionToken)
+
+        return ctx.json({
+          success: true,
+        })
+      } catch (_) {
+        return ctx.error("INTERNAL_SERVER_ERROR")
+      }
+    }
+  ),
+
+  /**
+   * Revoke all sessions for multiple users
+   */
+  revokeAllSessions: createAuthEndpoint(
+    "/attio/revoke-all-sessions",
+    {
+      method: "POST",
+      body: z.object({
+        secret: z.string(),
+        userIds: z.array(z.string()),
+      }),
+    },
+    async (ctx) => {
+      const error = validateSecret(opts, ctx)
+      if (error) return error
+
+      try {
+        await Promise.all(
+          ctx.body.userIds.map((userId) => ctx.context.internalAdapter.deleteSessions(userId))
+        )
 
         return ctx.json({
           success: true,

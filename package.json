@@ -1,6 +1,6 @@
 {
   "name": "better-auth-attio-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "description": "Sync users, workspaces and arbitrary objects between your Better Auth app and Attio",

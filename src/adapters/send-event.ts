@@ -1,6 +1,6 @@
 import type {AuthContext} from "better-auth"
-import type {ModelAdapter, SyncEvent} from "../adapters/types"
-import type {AttioPluginOptions} from "../index"
+import type {AttioPluginOptions} from "../index.js"
+import type {ModelAdapter, SyncEvent} from "./types.js"
 
 export const sendWebhookEvent = async (
   event: SyncEvent,

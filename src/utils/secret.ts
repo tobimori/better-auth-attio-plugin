@@ -1,6 +1,6 @@
 import type {AuthContext, EndpointContext, Method} from "better-auth"
 import type {z} from "zod"
-import type {AttioPluginOptions} from "../index"
+import type {AttioPluginOptions} from "../index.js"
 
 export const validateSecret = (
   opts: AttioPluginOptions,

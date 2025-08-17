@@ -1,4 +1,4 @@
-import type {ModelAdapter} from "./types"
+import type {ModelAdapter} from "./types.js"
 
 export const userAdapter: ModelAdapter = {
   betterAuthModel: "user",

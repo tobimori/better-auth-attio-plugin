@@ -1,12 +1,11 @@
-import type {User} from "better-auth"
-import {generateId} from "better-auth"
+import {generateId, type User} from "better-auth"
 import {createAuthEndpoint, type SessionWithImpersonatedBy} from "better-auth/plugins"
 import z from "zod"
-import type {AttioPluginOptions} from "."
-import type {ModelAdapter, SyncEvent} from "./adapters/types"
-import {extractAttioValue} from "./adapters/utils"
-import {validateSecret} from "./helpers/secret"
-import {sendWebhookEvent} from "./helpers/send-event"
+import {sendWebhookEvent} from "../adapters/send-event.js"
+import type {ModelAdapter, SyncEvent} from "../adapters/types.js"
+import {extractAttioValue} from "../adapters/utils.js"
+import type {AttioPluginOptions} from "../index.js"
+import {validateSecret} from "../utils/secret.js"
 
 export const endpoints = (opts: AttioPluginOptions) => ({
   /**

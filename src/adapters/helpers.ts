@@ -1,5 +1,5 @@
-import type {ModelAdapter} from "./types"
-import {defaultAdapters} from "./index"
+import {defaultAdapters} from "./index.js"
+import type {ModelAdapter} from "./types.js"
 
 export function getAdapters(userAdapters?: ModelAdapter[]): ModelAdapter[] {
   const adapters: ModelAdapter[] = []

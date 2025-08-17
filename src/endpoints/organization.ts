@@ -6,8 +6,8 @@ import {
   type organization,
 } from "better-auth/plugins"
 import {z} from "zod"
-import type {AttioPluginOptions} from "."
-import {validateSecret} from "./helpers/secret"
+import type {AttioPluginOptions} from "../index.js"
+import {validateSecret} from "../utils/secret.js"
 
 /**
  * Get the organization plugin from the auth context

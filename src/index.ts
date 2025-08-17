@@ -1,10 +1,10 @@
 import type {BetterAuthPlugin} from "better-auth/plugins"
-import {getAdapters} from "./adapters/helpers"
-import type {ModelAdapter} from "./adapters/types"
-import {endpoints as adminEndpoints} from "./admin"
-import {endpoints} from "./core"
-import {sendWebhookEvent} from "./helpers/send-event"
-import {endpoints as organizationEndpoints} from "./organization"
+import {getAdapters} from "./adapters/helpers.js"
+import {sendWebhookEvent} from "./adapters/send-event.js"
+import type {ModelAdapter} from "./adapters/types.js"
+import {endpoints as adminEndpoints} from "./endpoints/admin.js"
+import {endpoints} from "./endpoints/core.js"
+import {endpoints as organizationEndpoints} from "./endpoints/organization.js"
 
 export type AttioPluginOptions = {
   /**
@@ -135,3 +135,7 @@ export const attio = (opts: AttioPluginOptions) => {
     },
   } satisfies BetterAuthPlugin
 }
+
+export * from "./adapters/organization.js"
+export * from "./adapters/types.js"
+export * from "./adapters/user.js"

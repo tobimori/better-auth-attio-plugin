@@ -1,7 +1,7 @@
 import type {User} from "better-auth"
 import type {Member, Organization} from "better-auth/plugins"
-import type {ModelAdapter} from "./types"
-import {generateSlug, generateUniqueSlug} from "./utils"
+import type {ModelAdapter} from "./types.js"
+import {generateSlug, generateUniqueSlug} from "./utils.js"
 
 export const organizationAdapter: ModelAdapter = {
   betterAuthModel: "organization",

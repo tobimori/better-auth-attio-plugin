@@ -1,9 +1,9 @@
 import type {AuthContext} from "better-auth"
 import {type admin, createAuthEndpoint, type UserWithRole} from "better-auth/plugins"
 import {z} from "zod"
-import type {AttioPluginOptions} from "."
-import {getIp} from "./helpers/get-request-ip"
-import {validateSecret} from "./helpers/secret"
+import type {AttioPluginOptions} from "../index.js"
+import {getIp} from "../utils/get-request-ip.js"
+import {validateSecret} from "../utils/secret.js"
 
 /**
  * Get the admin plugin from the auth context

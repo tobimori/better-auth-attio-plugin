@@ -1,7 +1,26 @@
 {
   "name": "better-auth-attio-plugin",
   "module": "src/index.ts",
+  "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "description": "Sync users, workspaces and arbitrary objects between your Better Auth app and Attio",
+  "author": "Tobias Möritz <tobias@moeritz.io>",
+  "homepage": "https://github.com/tobimori/better-auth-attio-plugin",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tobimori/better-auth-attio-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tobimori/better-auth-attio-plugin/issues"
+  },
+  "keywords": [
+    "effect",
+    "attio",
+    "api",
+    "sdk",
+    "typescript"
+  ],
   "workspaces": [
     "playground"
   ],

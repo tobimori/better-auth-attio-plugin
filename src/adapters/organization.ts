@@ -6,6 +6,7 @@ import {generateSlug, generateUniqueSlug} from "./utils"
 export const organizationAdapter: ModelAdapter = {
   betterAuthModel: "organization",
   attioObject: "workspaces",
+  idField: "workspace_id",
 
   relatedModels: {
     member: (values) => values.organizationId as string | null,

@@ -56,6 +56,7 @@ export interface ModelAdapter {
   // Model identifiers
   betterAuthModel: string // e.g., "user", "organization"
   attioObject: string // e.g., "users", "workspaces"
+  idField: string // Field in Attio containing Better Auth ID (e.g., "user_id", "workspace_id")
 
   // Define which related models should trigger this adapter
   // e.g., { member: (values) => values.organizationId }

@@ -3,6 +3,7 @@ import type {ModelAdapter} from "./types"
 export const userAdapter: ModelAdapter = {
   betterAuthModel: "user",
   attioObject: "users",
+  idField: "user_id",
 
   toAttio: async (event, values, _ctx) => {
     if (event === "delete") {

@@ -168,11 +168,23 @@ export const endpoints = (opts: AttioPluginOptions) => ({
               }
             }
           } else if (syncEvent === "create" || syncEvent === "update") {
-            // check for existing record
-            const existing = (await ctx.context.adapter.findOne({
+            // check for existing record by attioId first
+            let existing = (await ctx.context.adapter.findOne({
               model: adapter.betterAuthModel,
               where: [{field: "attioId", value: attioId}],
             })) as Record<string, unknown> | null
+
+            // if not found by attioId, check by the Better Auth ID from Attio
+            // this handles the case where a local record exists but doesn't have attioId yet
+            if (!existing && adapter.idField && extractedValues[adapter.idField]) {
+              const betterAuthId = extractedValues[adapter.idField]
+              if (typeof betterAuthId === 'string') {
+                existing = (await ctx.context.adapter.findOne({
+                  model: adapter.betterAuthModel,
+                  where: [{field: "id", value: betterAuthId}],
+                })) as Record<string, unknown> | null
+              }
+            }
 
             // handle onMissing behavior
             const onMissing = adapter.onMissing || "create"

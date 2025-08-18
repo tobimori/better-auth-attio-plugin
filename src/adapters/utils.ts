@@ -16,6 +16,8 @@ export function extractAttioValue(fieldData: unknown): unknown {
       return item.target_record_id
     } else if (item.attribute_type === "personal-name") {
       return item.full_name
+    } else if (item.attribute_type === "select") {
+      return item.option.title
     } else if ("value" in item) {
       return item.value
     } else if ("referenced_actor_id" in item) {

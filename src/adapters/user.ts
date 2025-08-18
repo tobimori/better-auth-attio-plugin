@@ -38,7 +38,6 @@ export const userAdapter: ModelAdapter = {
       // add creation-specific fields
       return {
         ...base,
-        id: ctx.generateId({model: "user"}),
         createdAt: new Date(),
         updatedAt: new Date(),
       }

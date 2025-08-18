@@ -85,8 +85,6 @@ export const organizationAdapter: ModelAdapter = {
 
     // for create event, just set up the organization
     if (event === "create") {
-      orgId = ctx.generateId({model: "organization"}) || ""
-
       // check for slug uniqueness
       const slugToUse = values.slug || generateSlug(String(values.name || "org")) || ""
       const existingSlug = await ctx.adapter.findOne({
@@ -99,7 +97,6 @@ export const organizationAdapter: ModelAdapter = {
         forceAllowId: true,
         data: {
           ...orgData,
-          id: orgId,
           slug: existingSlug ? generateUniqueSlug(String(values.name || "org")) : slugToUse,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -116,7 +113,6 @@ export const organizationAdapter: ModelAdapter = {
       if (!existingOrg) {
         return {
           ...orgData,
-          id: ctx.generateId({model: "organization"}) || "",
           name: values.name || "Unnamed Organization",
           slug: values.slug || generateSlug(String(values.name || "org")) || "",
           createdAt: new Date(),

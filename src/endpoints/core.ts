@@ -1,5 +1,6 @@
 import {generateId, type User} from "better-auth"
-import {createAuthEndpoint, type SessionWithImpersonatedBy} from "better-auth/api"
+import {createAuthEndpoint} from "better-auth/api"
+import type {SessionWithImpersonatedBy} from "better-auth/plugins"
 import z from "zod"
 import {sendWebhookEvent} from "../adapters/send-event.js"
 import type {ModelAdapter, SyncEvent} from "../adapters/types.js"

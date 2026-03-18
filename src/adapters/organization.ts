@@ -1,5 +1,5 @@
 import type {User} from "better-auth"
-import type {Member, Organization} from "better-auth/api"
+import type {Member, Organization} from "better-auth/plugins"
 import type {ModelAdapter} from "./types.js"
 import {generateSlug, generateUniqueSlug} from "./utils.js"
 

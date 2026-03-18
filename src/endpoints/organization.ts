@@ -1,10 +1,6 @@
 import type {AuthContext, User} from "better-auth"
-import {
-  createAuthEndpoint,
-  type Invitation,
-  type Member,
-  type organization,
-} from "better-auth/api"
+import {createAuthEndpoint} from "better-auth/api"
+import {type Invitation, type Member, type organization} from "better-auth/plugins"
 import {z} from "zod"
 import type {AttioPluginOptions} from "../index.js"
 import {validateSecret} from "../utils/secret.js"

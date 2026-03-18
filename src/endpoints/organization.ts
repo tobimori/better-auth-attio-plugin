@@ -4,7 +4,7 @@ import {
   type Invitation,
   type Member,
   type organization,
-} from "better-auth/plugins"
+} from "better-auth/api"
 import {z} from "zod"
 import type {AttioPluginOptions} from "../index.js"
 import {validateSecret} from "../utils/secret.js"

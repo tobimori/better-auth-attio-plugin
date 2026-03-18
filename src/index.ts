@@ -1,4 +1,4 @@
-import type {BetterAuthPlugin} from "better-auth/plugins"
+import type {BetterAuthPlugin} from "better-auth/api"
 import {getAdapters} from "./adapters/helpers.js"
 import {sendWebhookEvent} from "./adapters/send-event.js"
 import type {ModelAdapter} from "./adapters/types.js"

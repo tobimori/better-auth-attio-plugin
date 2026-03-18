@@ -1,5 +1,5 @@
 import type {AuthContext} from "better-auth"
-import {type admin, createAuthEndpoint, type UserWithRole} from "better-auth/plugins"
+import {type admin, createAuthEndpoint, type UserWithRole} from "better-auth/api"
 import {z} from "zod"
 import type {AttioPluginOptions} from "../index.js"
 import {getIp} from "../utils/get-request-ip.js"

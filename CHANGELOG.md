@@ -1,5 +1,11 @@
 # better-auth-attio-plugin
 
+## 0.3.3
+
+### Patch Changes
+
+- 270af1b: Fix import path from `better-auth/plugins` to `better-auth/api` to align with better-auth's updated module structure
+
 ## 0.3.2
 
 ### Patch Changes

@@ -46,5 +46,5 @@
     "better-auth": "^1.7.2",
     "zod": "^4.0.17"
   },
-  "packageManager": "pnpm@10.22.0"
+  "packageManager": "pnpm@12.3.1"
 }

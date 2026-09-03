@@ -1,6 +1,12 @@
 import type {AuthContext, User} from "better-auth"
 import {createAuthEndpoint} from "better-auth/api"
-import {type Invitation, type Member, type organization} from "better-auth/plugins"
+import {
+  type Invitation,
+  type Member,
+  hasPermission,
+  type Organization,
+  type organization,
+} from "better-auth/plugins"
 import {z} from "zod"
 import type {AttioPluginOptions} from "../index.js"
 import {validateSecret} from "../utils/secret.js"
@@ -96,7 +102,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
           invitations: sortedInvitations,
           count: sortedInvitations.length,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -132,14 +138,14 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             },
           ],
           update: {
-            status: "cancelled",
+            status: "canceled",
           },
         })
 
         return ctx.json({
           success: true,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -176,7 +182,77 @@ export const endpoints = (opts: AttioPluginOptions) => ({
         )
 
         if (!inviterResult?.user) {
-          return ctx.error("NOT_FOUND")
+          return ctx.error("NOT_FOUND", {message: "Inviter user not found"})
+        }
+
+        const organization = (await ctx.context.adapter.findOne({
+          model: "organization",
+          where: [{field: "id", value: ctx.body.organizationId}],
+        })) as Organization | null
+        if (!organization) {
+          return ctx.error("NOT_FOUND", {message: "Organization not found"})
+        }
+
+        const inviterMember = (await ctx.context.adapter.findOne({
+          model: "member",
+          where: [
+            {field: "userId", value: inviterResult.user.id},
+            {field: "organizationId", value: ctx.body.organizationId},
+          ],
+        })) as Member | null
+        if (!inviterMember) {
+          return ctx.error("FORBIDDEN", {
+            message: "Inviter is not a member of this organization",
+          })
+        }
+
+        const canInvite = await hasPermission(
+          {
+            role: inviterMember.role,
+            options: plugin.options,
+            permissions: {invitation: ["create"]},
+            organizationId: ctx.body.organizationId,
+          },
+          ctx
+        )
+        if (!canInvite) {
+          return ctx.error("FORBIDDEN", {
+            message: "Inviter cannot create invitations for this organization",
+          })
+        }
+
+        const role = Array.isArray(ctx.body.role) ? ctx.body.role.join(",") : ctx.body.role
+        const creatorRole = plugin.options?.creatorRole || "owner"
+        if (
+          !inviterMember.role
+            .split(",")
+            .map((item) => item.trim())
+            .includes(creatorRole) &&
+          role
+            .split(",")
+            .map((item) => item.trim())
+            .includes(creatorRole)
+        ) {
+          return ctx.error("FORBIDDEN", {
+            message: `Only ${creatorRole} members can invite another ${creatorRole}`,
+          })
+        }
+        const sendInvitationEmail = async (invitation: Invitation) => {
+          if (!plugin.options?.sendInvitationEmail) return
+
+          await ctx.context.runInBackgroundOrAwait(
+            plugin.options.sendInvitationEmail(
+              {
+                id: invitation.id,
+                role: invitation.role,
+                email: invitation.email,
+                organization,
+                inviter: {...inviterMember, user: inviterResult.user},
+                invitation,
+              },
+              ctx.request
+            )
+          )
         }
 
         // Check if user is already invited
@@ -246,19 +322,20 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             },
           })
 
-          return ctx.json({
+          const updatedInvitation: Invitation = {
             ...existingInvitation,
-            expiresAt: expiresAt.toISOString(),
+            expiresAt,
             inviterId: inviterResult.user.id,
-            resent: true,
-          })
+          }
+          await sendInvitationEmail(updatedInvitation)
+
+          return ctx.json({...updatedInvitation, resent: true})
         }
 
         // Create new invitation
         const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7) // 7 days
-        const role = Array.isArray(ctx.body.role) ? ctx.body.role.join(",") : ctx.body.role
 
-        const invitation = await ctx.context.adapter.create({
+        const invitation = (await ctx.context.adapter.create({
           model: "invitation",
           data: {
             email: ctx.body.email.toLowerCase(),
@@ -268,54 +345,11 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             status: "pending",
             expiresAt,
           },
-        })
+        })) as Invitation
 
-        if (plugin.options?.sendInvitationEmail) {
-          const organization = await ctx.context.adapter.findOne({
-            model: "organization",
-            where: [
-              {
-                field: "id",
-                value: ctx.body.organizationId,
-              },
-            ],
-          })
-
-          if (organization) {
-            // resolve inviter member for new sendInvitationEmail signature (Member & {user})
-            const inviterMember = (await ctx.context.adapter.findOne({
-              model: "member",
-              where: [
-                {field: "userId", value: inviterResult.user.id},
-                {field: "organizationId", value: ctx.body.organizationId},
-              ],
-            })) as Member | null
-            const inviter: Member & {user: typeof inviterResult.user} = inviterMember
-              ? {...inviterMember, user: inviterResult.user}
-              : ({
-                  id: `inviter-${inviterResult.user.id}`,
-                  organizationId: ctx.body.organizationId,
-                  userId: inviterResult.user.id,
-                  role,
-                  createdAt: new Date(),
-                  user: inviterResult.user,
-                } as unknown as Member & {user: typeof inviterResult.user})
-            await plugin.options.sendInvitationEmail(
-              {
-                id: invitation.id,
-                role: invitation.role,
-                email: invitation.email,
-                organization: organization as any,
-                inviter,
-                invitation: invitation as any,
-              },
-              ctx.request
-            )
-          }
-        }
-
+        await sendInvitationEmail(invitation)
         return ctx.json(invitation)
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -364,10 +398,10 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             id: user.id,
             email: user.email,
             name: user.name,
-            image: user.image,
+            image: user.image ?? null,
           })),
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }

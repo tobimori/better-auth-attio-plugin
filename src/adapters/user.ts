@@ -19,7 +19,7 @@ export const userAdapter: ModelAdapter = {
     }
   },
 
-  fromAttio: async (event, values, ctx) => {
+  fromAttio: async (event, values, _ctx) => {
     if (event === "delete") {
       // return minimal data needed for deletion
       return {id: values.user_id}

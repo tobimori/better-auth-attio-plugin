@@ -1,3 +1,22 @@
+const extractSingleAttioValue = (item: any) => {
+  if (item.attribute_type === "email-address") {
+    return item.email_address
+  } else if (item.attribute_type === "phone-number") {
+    return item.phone_number || item.original_phone_number
+  } else if (item.attribute_type === "record-reference") {
+    return item.target_record_id
+  } else if (item.attribute_type === "personal-name") {
+    return item.full_name
+  } else if (item.attribute_type === "select") {
+    return item.option.title
+  } else if ("value" in item) {
+    return item.value
+  } else if ("referenced_actor_id" in item) {
+    return item.referenced_actor_id
+  }
+  return null
+}
+
 /**
  * Extract the actual value from Attio's field format
  * Attio returns values as arrays with history/metadata
@@ -7,30 +26,11 @@ export function extractAttioValue(fieldData: unknown): unknown {
     return null
   }
 
-  const extractSingleValue = (item: any) => {
-    if (item.attribute_type === "email-address") {
-      return item.email_address
-    } else if (item.attribute_type === "phone-number") {
-      return item.phone_number || item.original_phone_number
-    } else if (item.attribute_type === "record-reference") {
-      return item.target_record_id
-    } else if (item.attribute_type === "personal-name") {
-      return item.full_name
-    } else if (item.attribute_type === "select") {
-      return item.option.title
-    } else if ("value" in item) {
-      return item.value
-    } else if ("referenced_actor_id" in item) {
-      return item.referenced_actor_id
-    }
-    return null
-  }
-
   if (fieldData.length === 1) {
-    return extractSingleValue(fieldData[0])
+    return extractSingleAttioValue(fieldData[0])
   }
 
-  return fieldData.map(extractSingleValue)
+  return fieldData.map(extractSingleAttioValue)
 }
 
 /**

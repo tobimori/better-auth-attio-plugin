@@ -1,7 +1,7 @@
 import {generateId, type User} from "better-auth"
 import {createAuthEndpoint} from "better-auth/api"
 import type {SessionWithImpersonatedBy} from "better-auth/plugins"
-import z from "zod"
+import {z} from "zod"
 import {sendWebhookEvent} from "../adapters/send-event.js"
 import type {ModelAdapter, SyncEvent} from "../adapters/types.js"
 import {extractAttioValue} from "../adapters/utils.js"
@@ -225,8 +225,8 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             }
             // if onMissing is 'ignore', do nothing
           }
-        } catch (error) {
-          console.error(`Error processing event:`, error)
+        } catch (eventError) {
+          console.error(`Error processing event:`, eventError)
         }
       }
 
@@ -294,8 +294,8 @@ export const endpoints = (opts: AttioPluginOptions) => ({
           success: true,
           message: "Password reset email sent successfully",
         })
-      } catch (error) {
-        console.error("Error sending password reset:", error)
+      } catch (resetError) {
+        console.error("Error sending password reset:", resetError)
         return ctx.error("INTERNAL_SERVER_ERROR", {
           message: "Failed to send password reset email",
         })
@@ -330,7 +330,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
       const users: User[] = impersonatorIds.length
         ? await ctx.context.adapter.findMany({
             model: "user",
-            where: impersonatorIds.map((id) => ({field: "id", value: id})),
+            where: [{field: "id", value: impersonatorIds, operator: "in"}],
           })
         : []
 
@@ -338,6 +338,8 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
       const enhancedSessions = sessions.map((session) => ({
         ...session,
+        userAgent: session.userAgent || "",
+        ipAddress: session.ipAddress || "",
         impersonatedBy: session.impersonatedBy
           ? userMap[session.impersonatedBy] || session.impersonatedBy
           : undefined,
@@ -378,7 +380,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
         return ctx.json({
           success: true,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -408,7 +410,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
         return ctx.json({
           success: true,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }

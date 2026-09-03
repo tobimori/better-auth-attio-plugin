@@ -1,10 +1,14 @@
-import type {AuthContext} from "better-auth"
-import {createAuthEndpoint} from "better-auth/api"
+import {generateId, type AuthContext} from "better-auth"
+import {createAuthEndpoint, getIP, getSessionFromCtx} from "better-auth/api"
+import {deleteSessionCookie, expireCookie, setSessionCookie} from "better-auth/cookies"
 import {type admin, type UserWithRole} from "better-auth/plugins"
+import {defaultRoles as defaultAdminRoles} from "better-auth/plugins/admin/access"
 import {z} from "zod"
 import type {AttioPluginOptions} from "../index.js"
-import {getIp} from "../utils/get-request-ip.js"
 import {validateSecret} from "../utils/secret.js"
+
+const IMPERSONATION_HANDOFF_TTL_SECONDS = 5 * 60
+const IMPERSONATION_HANDOFF_PREFIX = "attio-impersonation:"
 
 /**
  * Get the admin plugin from the auth context
@@ -59,7 +63,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
           banReason,
           role,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -98,7 +102,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
         return ctx.json({
           success: true,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -126,36 +130,90 @@ export const endpoints = (opts: AttioPluginOptions) => ({
       }
 
       try {
-        // optionally find the admin user for tracking
-        const adminUser = await ctx.context.internalAdapter.findUserByEmail(ctx.body.adminEmail)
-        const impersonatedBy = adminUser?.user?.id || ctx.body.adminEmail
+        const adminUser = await ctx.context.internalAdapter.findUserByEmail(
+          ctx.body.adminEmail.toLowerCase()
+        )
+        if (!adminUser?.user) {
+          return ctx.error("NOT_FOUND", {message: "Admin user not found"})
+        }
 
-        // get admin plugin options for impersonation duration
-        const adminPlugin = ctx.context.options.plugins?.find((p) => p.id === "admin")
-        const impersonationDuration = adminPlugin?.options?.impersonationSessionDuration || 60 * 60 // default 1 hour
+        const adminPlugin = getAdminPlugin(ctx.context)
+        const admin = adminUser.user as UserWithRole
+        const roleDefinitions = adminPlugin.options?.roles || defaultAdminRoles
+        const hasPermission = (permission: "impersonate" | "impersonate-admins") =>
+          Boolean(adminPlugin.options?.adminUserIds?.includes(admin.id)) ||
+          (admin.role || adminPlugin.options?.defaultRole || "user")
+            .split(",")
+            .some(
+              (role: string) =>
+                roleDefinitions[role.trim()]?.authorize({user: [permission]}).success
+            )
 
+        if (!hasPermission("impersonate")) {
+          return ctx.error("FORBIDDEN", {message: "User cannot impersonate other users"})
+        }
+
+        const targetUser = (await ctx.context.internalAdapter.findUserById(
+          ctx.body.targetUserId
+        )) as UserWithRole | null
+        if (!targetUser) {
+          return ctx.error("NOT_FOUND", {message: "Target user not found"})
+        }
+
+        const adminRoles = (
+          Array.isArray(adminPlugin.options?.adminRoles)
+            ? adminPlugin.options.adminRoles
+            : adminPlugin.options?.adminRoles?.split(",") || ["admin"]
+        ).map((role: string) => role.trim())
+        const targetIsAdmin =
+          Boolean(adminPlugin.options?.adminUserIds?.includes(targetUser.id)) ||
+          (targetUser.role || adminPlugin.options?.defaultRole || "user")
+            .split(",")
+            .some((role: string) => adminRoles.includes(role.trim()))
+        if (
+          targetIsAdmin &&
+          adminPlugin.options?.allowImpersonatingAdmins !== true &&
+          !hasPermission("impersonate-admins")
+        ) {
+          return ctx.error("FORBIDDEN", {message: "User cannot impersonate administrators"})
+        }
+
+        const impersonationDuration = adminPlugin.options?.impersonationSessionDuration || 60 * 60
         const expiresAt = new Date(Date.now() + impersonationDuration * 1000)
 
         const session = await ctx.context.internalAdapter.createSession(
-          ctx.body.targetUserId,
+          targetUser.id,
           true,
           {
-            impersonatedBy,
+            impersonatedBy: admin.id,
             expiresAt,
-            userAgent: "Attio",
           },
           true
         )
 
-        if (!session) {
-          return ctx.error("INTERNAL_SERVER_ERROR")
+        const handoffToken = generateId(32)
+        const handoffExpiresAt = new Date(
+          Math.min(expiresAt.getTime(), Date.now() + IMPERSONATION_HANDOFF_TTL_SECONDS * 1000)
+        )
+
+        try {
+          await ctx.context.internalAdapter.createVerificationValue({
+            identifier: `${IMPERSONATION_HANDOFF_PREFIX}${handoffToken}`,
+            value: session.token,
+            expiresAt: handoffExpiresAt,
+          })
+        } catch (handoffError) {
+          await ctx.context.internalAdapter.deleteSession(session.token)
+          throw handoffError
         }
 
         return ctx.json({
           success: true,
-          sessionToken: session.token,
+          // Keep the response field for compatibility. This is a one-time handoff token,
+          // not the Better Auth session token.
+          sessionToken: handoffToken,
         })
-      } catch (_) {
+      } catch {
         return ctx.error("INTERNAL_SERVER_ERROR")
       }
     }
@@ -174,61 +232,49 @@ export const endpoints = (opts: AttioPluginOptions) => ({
     },
     async (ctx) => {
       try {
-        // find the session to validate it exists
-        const sessionData = await ctx.context.internalAdapter.findSession(ctx.query.token)
+        // Atomically consume the short-lived handoff token. A second request gets null.
+        const handoff = await ctx.context.internalAdapter.consumeVerificationValue(
+          `${IMPERSONATION_HANDOFF_PREFIX}${ctx.query.token}`
+        )
+        if (!handoff) {
+          return ctx.redirect("/?error=invalid_or_used_session")
+        }
 
-        if (!sessionData?.session) {
+        const sessionData = await ctx.context.internalAdapter.findSession(handoff.value)
+        if (!sessionData?.session.impersonatedBy) {
           return ctx.redirect("/?error=invalid_session")
         }
 
-        // only allow if session was created by Attio and hasn't been used yet
-        if (!sessionData.session.userAgent?.includes("Attio")) {
-          return ctx.redirect("/?error=session_already_used")
-        }
+        const session =
+          (await ctx.context.internalAdapter.updateSession(sessionData.session.token, {
+            userAgent: ctx.headers?.get("user-agent") || "",
+            ipAddress: ctx.headers ? getIP(ctx.headers, ctx.context.options) : null,
+          })) || sessionData.session
 
-        // update the session with real user agent and IP from this request
-        const realUserAgent = ctx.headers?.get("user-agent") || ""
-        const realIpAddress = ctx.headers ? getIp(ctx.headers, ctx.context.options) : ""
-
-        await ctx.context.adapter.update({
-          model: "session",
-          where: [{field: "token", value: ctx.query.token}],
-          update: {
-            userAgent: realUserAgent,
-            ipAddress: realIpAddress,
-          },
-        })
-
-        const authCookies = ctx.context.authCookies
-
-        // if there's an existing session, save it as admin_session
-        if (ctx.context.session?.session) {
+        // Better Auth can restore only the session of the same admin that created
+        // the impersonation session. Do not preserve an unrelated browser session.
+        const currentSession = await getSessionFromCtx(ctx)
+        const adminCookie = ctx.context.createAuthCookie("admin_session")
+        if (currentSession && currentSession.user.id === sessionData.session.impersonatedBy) {
           const dontRememberMeCookie = await ctx.getSignedCookie(
             ctx.context.authCookies.dontRememberToken.name,
             ctx.context.secret
           )
-          const adminCookieProp = ctx.context.createAuthCookie("admin_session")
           await ctx.setSignedCookie(
-            adminCookieProp.name,
-            `${ctx.context.session.session.token}:${dontRememberMeCookie || ""}`,
+            adminCookie.name,
+            `${currentSession.session.token}:${dontRememberMeCookie || ""}`,
             ctx.context.secret,
-            authCookies.sessionToken.attributes
+            ctx.context.authCookies.sessionToken.attributes
           )
+        } else {
+          expireCookie(ctx, adminCookie)
         }
 
-        // set the impersonation session cookie
-        await ctx.setSignedCookie(
-          authCookies.sessionToken.name,
-          sessionData.session.token,
-          ctx.context.secret,
-          authCookies.sessionToken.attributes
-        )
-
-        // redirect to the app's base URL
+        deleteSessionCookie(ctx)
+        await setSessionCookie(ctx, {session, user: sessionData.user}, true)
         return ctx.redirect("/")
-      } catch (_) {
-        const baseUrl = ctx.request?.headers.get("referer") || "/"
-        return ctx.redirect(`${baseUrl}?error=session_failed`)
+      } catch {
+        return ctx.redirect("/?error=session_failed")
       }
     }
   ),

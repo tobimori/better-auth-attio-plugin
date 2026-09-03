@@ -34,8 +34,8 @@ Visit the [Attio Connection Generator](https://better-auth-attio-plugin.vercel.a
 Add the Attio plugin to your Better Auth configuration:
 
 ```ts
-import { betterAuth } from "better-auth";
-import { attio } from "better-auth-attio-plugin";
+import {betterAuth} from "better-auth"
+import {attio} from "better-auth-attio-plugin"
 
 export const auth = betterAuth({
   // ... your other config
@@ -49,12 +49,13 @@ export const auth = betterAuth({
     admin(),
     organization(),
   ],
-});
+})
 ```
 
 ### 3. Install the Attio App
 
 In Attio:
+
 1. Navigate to Settings > Apps
 2. Install the Better Auth integration
 3. Paste the connection string from step 1
@@ -67,12 +68,13 @@ By default, the plugin syncs users and organizations with predefined field mappi
 ### Custom Adapters
 
 Adapters control how data is transformed between Better Auth and Attio. Use them to:
+
 - Add custom fields to the sync
 - Change field mappings
 - Sync custom database models to any Attio object
 
 ```ts
-import { userAdapter } from "better-auth-attio-plugin/adapters";
+import {userAdapter} from "better-auth-attio-plugin/adapters"
 
 attio({
   secret: process.env.ATTIO_SECRET,
@@ -89,11 +91,11 @@ attio({
       },
       // Map data when syncing to Attio
       toAttio: async (event, values, ctx) => {
-        const base = await userAdapter.toAttio(event, values, ctx);
+        const base = await userAdapter.toAttio(event, values, ctx)
         return {
           ...base,
           subscription_tier: values.metadata?.tier || "free",
-        };
+        }
       },
     },
   ],

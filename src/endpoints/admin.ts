@@ -138,11 +138,11 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
         const session = await ctx.context.internalAdapter.createSession(
           ctx.body.targetUserId,
-          ctx,
           true,
           {
             impersonatedBy,
             expiresAt,
+            userAgent: "Attio",
           },
           true
         )
@@ -212,7 +212,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
             adminCookieProp.name,
             `${ctx.context.session.session.token}:${dontRememberMeCookie || ""}`,
             ctx.context.secret,
-            authCookies.sessionToken.options
+            authCookies.sessionToken.attributes
           )
         }
 
@@ -221,7 +221,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
           authCookies.sessionToken.name,
           sessionData.session.token,
           ctx.context.secret,
-          authCookies.sessionToken.options
+          authCookies.sessionToken.attributes
         )
 
         // redirect to the app's base URL

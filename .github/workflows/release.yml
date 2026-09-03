@@ -19,22 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
         with:
-          bun-version: latest
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          cache: pnpm
 
-      - run: bun install
+      - run: pnpm install
 
       - name: Create Release Pull Request or Publish to npm
         uses: changesets/action@v1
         with:
-          publish: bun run release
-          version: bun run changeset version
+          publish: pnpm run release
+          version: pnpm run changeset version
           commit: "chore: version packages"
           title: "chore: version packages"
         env:

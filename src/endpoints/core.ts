@@ -271,14 +271,11 @@ export const endpoints = (opts: AttioPluginOptions) => ({
         const expiresAt = new Date(Date.now() + expiresInSeconds * 1000)
         const verificationToken = generateId(24)
 
-        await ctx.context.internalAdapter.createVerificationValue(
-          {
-            value: user.id,
-            identifier: `reset-password:${verificationToken}`,
-            expiresAt,
-          },
-          ctx
-        )
+        await ctx.context.internalAdapter.createVerificationValue({
+          value: user.id,
+          identifier: `reset-password:${verificationToken}`,
+          expiresAt,
+        })
 
         const redirectTo = opts.passwordResetRedirectTo || "/reset-password"
         const callbackURL = encodeURIComponent(redirectTo)
@@ -405,7 +402,7 @@ export const endpoints = (opts: AttioPluginOptions) => ({
 
       try {
         await Promise.all(
-          ctx.body.userIds.map((userId) => ctx.context.internalAdapter.deleteSessions(userId))
+          ctx.body.userIds.map((userId) => ctx.context.internalAdapter.deleteUserSessions(userId))
         )
 
         return ctx.json({

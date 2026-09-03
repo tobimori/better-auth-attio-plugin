@@ -1,19 +1,9 @@
-import type {AuthContext, EndpointContext, Method} from "better-auth"
-import type {z} from "zod"
+import type {GenericEndpointContext} from "better-auth"
 import type {AttioPluginOptions} from "../index.js"
 
 export const validateSecret = (
   opts: AttioPluginOptions,
-  ctx: EndpointContext<
-    string,
-    {
-      method: Method
-      body: z.ZodObject<{
-        secret: z.ZodString
-      }>
-    },
-    AuthContext
-  >
+  ctx: GenericEndpointContext & {body: {secret: string}}
 ) => {
   const secret = opts.secret || ctx.context.secret
   if (secret && ctx.body.secret !== secret) {

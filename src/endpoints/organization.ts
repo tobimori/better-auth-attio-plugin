@@ -282,17 +282,32 @@ export const endpoints = (opts: AttioPluginOptions) => ({
           })
 
           if (organization) {
+            // resolve inviter member for new sendInvitationEmail signature (Member & {user})
+            const inviterMember = (await ctx.context.adapter.findOne({
+              model: "member",
+              where: [
+                {field: "userId", value: inviterResult.user.id},
+                {field: "organizationId", value: ctx.body.organizationId},
+              ],
+            })) as Member | null
+            const inviter: Member & {user: typeof inviterResult.user} = inviterMember
+              ? {...inviterMember, user: inviterResult.user}
+              : ({
+                  id: `inviter-${inviterResult.user.id}`,
+                  organizationId: ctx.body.organizationId,
+                  userId: inviterResult.user.id,
+                  role,
+                  createdAt: new Date(),
+                  user: inviterResult.user,
+                } as unknown as Member & {user: typeof inviterResult.user})
             await plugin.options.sendInvitationEmail(
               {
                 id: invitation.id,
                 role: invitation.role,
                 email: invitation.email,
-                organization,
-                inviter: {
-                  user: inviterResult.user,
-                  role: role,
-                },
-                invitation,
+                organization: organization as any,
+                inviter,
+                invitation: invitation as any,
               },
               ctx.request
             )
